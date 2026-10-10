@@ -1,0 +1,1231 @@
+[
+  {
+    "id": "src/berry/raw.rs:1",
+    "path": "src/berry/raw.rs",
+    "line": 211,
+    "symbol": "RootPtr::root",
+    "site": "unsafe { self.0.as_ref() }",
+    "proof": "layout",
+    "checks": [
+      "berry-layout",
+      "berry-initialized"
+    ],
+    "context_sha256": "469ff35f4885c654779212024f816d4877b5e7cb8ab0a5a6bb34b32ab524eed3"
+  },
+  {
+    "id": "src/berry/raw.rs:2",
+    "path": "src/berry/raw.rs",
+    "line": 217,
+    "symbol": "RootPtr::class",
+    "site": "unsafe {",
+    "proof": "layout",
+    "checks": [
+      "berry-layout",
+      "berry-initialized"
+    ],
+    "context_sha256": "846a586fc95dceb0fd04c5418cfda60142c7d0fda58be304772e2f1dbf913545"
+  },
+  {
+    "id": "src/berry/raw.rs:3",
+    "path": "src/berry/raw.rs",
+    "line": 231,
+    "symbol": "RootPtr::domain",
+    "site": "unsafe {",
+    "proof": "layout",
+    "checks": [
+      "berry-layout",
+      "berry-initialized"
+    ],
+    "context_sha256": "31d91a11285877e968862b13fbbaa9afcd9e546e17ce4f8518d22e576fbd9280"
+  },
+  {
+    "id": "src/berry/raw.rs:4",
+    "path": "src/berry/raw.rs",
+    "line": 245,
+    "symbol": "RootPtr::slot",
+    "site": "unsafe {",
+    "proof": "layout",
+    "checks": [
+      "berry-layout",
+      "berry-initialized"
+    ],
+    "context_sha256": "ad685c61812638108cdbfd9a5e6644144b77b27fbf46af0afc608a27c9340509"
+  },
+  {
+    "id": "src/berry/raw.rs:5",
+    "path": "src/berry/raw.rs",
+    "line": 258,
+    "symbol": "RootPtr::free_id",
+    "site": "unsafe {",
+    "proof": "layout",
+    "checks": [
+      "berry-layout",
+      "berry-initialized"
+    ],
+    "context_sha256": "caeb8094036ba2fe22f1a3bdc67b114d9284deab8df64b36d16c18731d214e9e"
+  },
+  {
+    "id": "src/berry/raw.rs:6",
+    "path": "src/berry/raw.rs",
+    "line": 274,
+    "symbol": "RootPtr::grant",
+    "site": "unsafe {",
+    "proof": "layout",
+    "checks": [
+      "berry-layout",
+      "berry-initialized"
+    ],
+    "context_sha256": "6428855c689bfa490862abe3570f08951ad0d6b4669a10b0cccdac0fb79e7761"
+  },
+  {
+    "id": "src/berry/raw.rs:7",
+    "path": "src/berry/raw.rs",
+    "line": 328,
+    "symbol": "RootPtr::recycle_domain",
+    "site": "unsafe { self.free_id(count).write(index) };",
+    "proof": "admission",
+    "checks": [
+      "berry-admission",
+      "berry-generation",
+      "berry-maintenance",
+      "reservations"
+    ],
+    "context_sha256": "9e23fbd01e185551505242389fab27ae3b868862b683f6a5c3152523d21fe6c1"
+  },
+  {
+    "id": "src/berry/raw.rs:8",
+    "path": "src/berry/raw.rs",
+    "line": 400,
+    "symbol": "RootPtr::destroy",
+    "site": "unsafe {",
+    "proof": "teardown",
+    "checks": [
+      "berry-destroy",
+      "berry-return"
+    ],
+    "context_sha256": "3000983835823e6eead35e2d1a1db88f6e579812c24efda790e60ef41dd7379b"
+  },
+  {
+    "id": "src/berry/raw.rs:9",
+    "path": "src/berry/raw.rs",
+    "line": 421,
+    "symbol": "Send for Diagnostics::destroy",
+    "site": "unsafe impl Send for Diagnostics {}",
+    "proof": "diagnostics",
+    "checks": [
+      "berry-destroy",
+      "berry-return"
+    ],
+    "context_sha256": "11e4857fc1f856d42c15d9617d69f438f2e09e0a5867080ee9371ed30eebf13e"
+  },
+  {
+    "id": "src/berry/raw.rs:10",
+    "path": "src/berry/raw.rs",
+    "line": 423,
+    "symbol": "Sync for Diagnostics::destroy",
+    "site": "unsafe impl Sync for Diagnostics {}",
+    "proof": "diagnostics",
+    "checks": [
+      "berry-destroy",
+      "berry-return"
+    ],
+    "context_sha256": "827ff83d1237e3fc18f43028ac7b225d50db659ef093e82137274fae34d573cd"
+  },
+  {
+    "id": "src/berry/raw.rs:11",
+    "path": "src/berry/raw.rs",
+    "line": 436,
+    "symbol": "Diagnostics::record",
+    "site": "unsafe { self.ptr.as_ref() }",
+    "proof": "diagnostics",
+    "checks": [
+      "berry-destroy",
+      "berry-return"
+    ],
+    "context_sha256": "3e47b2329d442e8df031979a564166272fbb18b024a962648c98b87307dbea38"
+  },
+  {
+    "id": "src/berry/raw.rs:12",
+    "path": "src/berry/raw.rs",
+    "line": 472,
+    "symbol": "Drop for Diagnostics::drop",
+    "site": "unsafe {",
+    "proof": "diagnostics",
+    "checks": [
+      "berry-destroy",
+      "berry-return"
+    ],
+    "context_sha256": "a793df81d86e17f57d548c7cf9ef2f20a8b1a266f2287d685a903892378abf9a"
+  },
+  {
+    "id": "src/berry/raw.rs:13",
+    "path": "src/berry/raw.rs",
+    "line": 494,
+    "symbol": "StorageOwner::prepare",
+    "site": "let memory = NonNull::new(unsafe { alloc(plan.layout) }).ok_or(Error::AllocationFailed)?;",
+    "proof": "preparation",
+    "checks": [
+      "berry-layout",
+      "berry-initialized"
+    ],
+    "context_sha256": "0f526980dbe527b2b339b1991a980528aa113b5ea36fa7e38916a0ee771b485a"
+  },
+  {
+    "id": "src/berry/raw.rs:14",
+    "path": "src/berry/raw.rs",
+    "line": 496,
+    "symbol": "StorageOwner::prepare",
+    "site": "let diagnostic = NonNull::new(unsafe { alloc(Layout::new::<DiagnosticRecord>()) });",
+    "proof": "preparation",
+    "checks": [
+      "berry-layout",
+      "berry-initialized"
+    ],
+    "context_sha256": "b24eaf7623db6c8298ca3e128090dc8be7c9b5e92277f49cbdb422811239feff"
+  },
+  {
+    "id": "src/berry/raw.rs:15",
+    "path": "src/berry/raw.rs",
+    "line": 499,
+    "symbol": "StorageOwner::prepare",
+    "site": "unsafe {",
+    "proof": "preparation",
+    "checks": [
+      "berry-layout",
+      "berry-initialized"
+    ],
+    "context_sha256": "5a891dc3f79a9ff6c83332e57389cc66db14f1dfbdad68f13eed9e0fda910165"
+  },
+  {
+    "id": "src/berry/raw.rs:16",
+    "path": "src/berry/raw.rs",
+    "line": 509,
+    "symbol": "StorageOwner::prepare",
+    "site": "unsafe {",
+    "proof": "preparation",
+    "checks": [
+      "berry-layout",
+      "berry-initialized"
+    ],
+    "context_sha256": "c33b51dab91657d7cffec561924dede1bab432d3cea4ce77ba39be4ef1cc4da1"
+  },
+  {
+    "id": "src/berry/raw.rs:17",
+    "path": "src/berry/raw.rs",
+    "line": 745,
+    "symbol": "Pool::open_inner",
+    "site": "let index = unsafe { self.root.free_id(count - 1).read() };",
+    "proof": "admission",
+    "checks": [
+      "berry-admission",
+      "berry-generation",
+      "berry-maintenance",
+      "reservations"
+    ],
+    "context_sha256": "588db15d41de498ebde3521421c2dbad198709df30dac052efe2e7c315594a05"
+  },
+  {
+    "id": "src/berry/raw.rs:18",
+    "path": "src/berry/raw.rs",
+    "line": 963,
+    "symbol": "Domain::acquire",
+    "site": "unsafe {",
+    "proof": "admission",
+    "checks": [
+      "berry-admission",
+      "berry-generation",
+      "berry-maintenance",
+      "reservations"
+    ],
+    "context_sha256": "2b50f0860224212d7667e04c7abf4857d62b9ac084572d181d4ec1449f24aa7f"
+  },
+  {
+    "id": "src/berry/raw.rs:19",
+    "path": "src/berry/raw.rs",
+    "line": 1056,
+    "symbol": "Send for Lease::drop",
+    "site": "unsafe impl Send for Lease {}",
+    "proof": "ownership",
+    "checks": [
+      "berry-initialized",
+      "berry-bytes",
+      "berry-return",
+      "traits"
+    ],
+    "context_sha256": "ac0425afee93ac9d81585bf00d208eb5ad2359e1ab0a4184a8037ba85eeb25c8"
+  },
+  {
+    "id": "src/berry/raw.rs:20",
+    "path": "src/berry/raw.rs",
+    "line": 1059,
+    "symbol": "Sync for Lease::drop",
+    "site": "unsafe impl Sync for Lease {}",
+    "proof": "ownership",
+    "checks": [
+      "berry-initialized",
+      "berry-bytes",
+      "berry-return",
+      "traits"
+    ],
+    "context_sha256": "457e08e8b36d23bc29fe452ff27b0d3871a5e21b76eeae4acf09f13a05bfaae5"
+  },
+  {
+    "id": "src/berry/raw.rs:21",
+    "path": "src/berry/raw.rs",
+    "line": 1071,
+    "symbol": "Lease::origin",
+    "site": "unsafe { *self.slot().origin.get() }",
+    "proof": "ownership",
+    "checks": [
+      "berry-initialized",
+      "berry-bytes",
+      "berry-return",
+      "traits"
+    ],
+    "context_sha256": "c5bb3d13f583bf7bab1903cac7a1672df303847d3e2dfde3cd40d1a79a248a9d"
+  },
+  {
+    "id": "src/berry/raw.rs:22",
+    "path": "src/berry/raw.rs",
+    "line": 1076,
+    "symbol": "Lease::data",
+    "site": "unsafe {",
+    "proof": "ownership",
+    "checks": [
+      "berry-initialized",
+      "berry-bytes",
+      "berry-return",
+      "traits"
+    ],
+    "context_sha256": "4511d1f8b1971c3f89218390c30a1d181faea354db7243b62e8277bacb427b0b"
+  },
+  {
+    "id": "src/berry/raw.rs:23",
+    "path": "src/berry/raw.rs",
+    "line": 1140,
+    "symbol": "bytes::BufMut for BufMut::drop",
+    "site": "unsafe impl bytes::BufMut for BufMut {",
+    "proof": "ownership",
+    "checks": [
+      "berry-initialized",
+      "berry-bytes",
+      "berry-return",
+      "traits"
+    ],
+    "context_sha256": "b487ad66e978379b38bf278acafd20b77838565b869dc545d48ccf1389de4d25"
+  },
+  {
+    "id": "src/berry/raw.rs:24",
+    "path": "src/berry/raw.rs",
+    "line": 1148,
+    "symbol": "bytes::BufMut for BufMut::chunk_mut",
+    "site": "unsafe {",
+    "proof": "ownership",
+    "checks": [
+      "berry-initialized",
+      "berry-bytes",
+      "berry-return",
+      "traits"
+    ],
+    "context_sha256": "5f957aafa3b7e4a65b37b1d2e4fc265f27ff0f24f38d4e648b2ddd9ff5222a32"
+  },
+  {
+    "id": "src/berry/raw.rs:25",
+    "path": "src/berry/raw.rs",
+    "line": 1155,
+    "symbol": "bytes::BufMut for BufMut::advance_mut",
+    "site": "unsafe fn advance_mut(&mut self, count: usize) {",
+    "proof": "ownership",
+    "checks": [
+      "berry-initialized",
+      "berry-bytes",
+      "berry-return",
+      "traits"
+    ],
+    "context_sha256": "1ea5c46c3e2b6756bf99ab48222f09aaa16ca98d98b512de067755eedb40a4cf"
+  },
+  {
+    "id": "src/berry/raw.rs:26",
+    "path": "src/berry/raw.rs",
+    "line": 1187,
+    "symbol": "BufMut::put_slice",
+    "site": "unsafe {",
+    "proof": "ownership",
+    "checks": [
+      "berry-initialized",
+      "berry-bytes",
+      "berry-return",
+      "traits"
+    ],
+    "context_sha256": "2ab2e1c2fc05ec9b3e8bc3fbf6962d2df725c34aa79d1c641fd94d9ca975fb3e"
+  },
+  {
+    "id": "src/berry/raw.rs:27",
+    "path": "src/berry/raw.rs",
+    "line": 1205,
+    "symbol": "BufMut::initialize_to",
+    "site": "unsafe {",
+    "proof": "ownership",
+    "checks": [
+      "berry-initialized",
+      "berry-bytes",
+      "berry-return",
+      "traits"
+    ],
+    "context_sha256": "516d0a85609a35e78e5db5ade9de202eb6f3fdad5a27a11c01becc2c8a1eb559"
+  },
+  {
+    "id": "src/berry/raw.rs:28",
+    "path": "src/berry/raw.rs",
+    "line": 1216,
+    "symbol": "BufMut::initialize_to",
+    "site": "Ok(unsafe { std::slice::from_raw_parts_mut(self.lease.data(), len) })",
+    "proof": "ownership",
+    "checks": [
+      "berry-initialized",
+      "berry-bytes",
+      "berry-return",
+      "traits"
+    ],
+    "context_sha256": "a27702f816d66553c9e73e4445fe446c17747823865944bf253e4383c06a1fad"
+  },
+  {
+    "id": "src/berry/raw.rs:29",
+    "path": "src/berry/raw.rs",
+    "line": 1238,
+    "symbol": "AsRef<[u8]> for BufMut::as_ref",
+    "site": "unsafe { std::slice::from_raw_parts(self.lease.data(), self.filled) }",
+    "proof": "ownership",
+    "checks": [
+      "berry-initialized",
+      "berry-bytes",
+      "berry-return",
+      "traits"
+    ],
+    "context_sha256": "2a1c02bb6801c0e7928a083e98a833d19cf4566f9a691b8901868a5345ca13c5"
+  },
+  {
+    "id": "src/berry/raw.rs:30",
+    "path": "src/berry/raw.rs",
+    "line": 1301,
+    "symbol": "AsRef<[u8]> for Buf::as_ref",
+    "site": "unsafe { std::slice::from_raw_parts(self.lease.data().add(self.range.start), self.len()) }",
+    "proof": "ownership",
+    "checks": [
+      "berry-initialized",
+      "berry-bytes",
+      "berry-return",
+      "traits"
+    ],
+    "context_sha256": "1dab8db71e8c00fb59a172f09ae1eb157295dc47410dd6b70e35e68f2fc83c55"
+  },
+  {
+    "id": "src/berry/raw.rs:31",
+    "path": "src/berry/raw.rs",
+    "line": 1563,
+    "symbol": "Default for DomainMetrics::snapshot",
+    "site": "let origin = unsafe { *slot.origin.get() };",
+    "proof": "observations",
+    "checks": [
+      "snapshots"
+    ],
+    "context_sha256": "504c80a55bf22c3be9477445b0018da61eb7f9830d653fc283785a7fe8bf0ac3"
+  },
+  {
+    "id": "src/mosaic/raw.rs:1",
+    "path": "src/mosaic/raw.rs",
+    "line": 308,
+    "symbol": "RootPtr::root",
+    "site": "unsafe { self.0.as_ref() }",
+    "proof": "layout",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "5b065ff14b068f02767e056c4d7c619e78ac8aab8a17ac2157b1205070a9a228"
+  },
+  {
+    "id": "src/mosaic/raw.rs:2",
+    "path": "src/mosaic/raw.rs",
+    "line": 314,
+    "symbol": "RootPtr::class",
+    "site": "unsafe {",
+    "proof": "layout",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "d48dd5bb1387308a9fe28e061630469d16fa608d923a4ed70040ba1c1841b15b"
+  },
+  {
+    "id": "src/mosaic/raw.rs:3",
+    "path": "src/mosaic/raw.rs",
+    "line": 328,
+    "symbol": "RootPtr::domain",
+    "site": "unsafe {",
+    "proof": "layout",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "31d91a11285877e968862b13fbbaa9afcd9e546e17ce4f8518d22e576fbd9280"
+  },
+  {
+    "id": "src/mosaic/raw.rs:4",
+    "path": "src/mosaic/raw.rs",
+    "line": 342,
+    "symbol": "RootPtr::slot",
+    "site": "unsafe {",
+    "proof": "layout",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "ad685c61812638108cdbfd9a5e6644144b77b27fbf46af0afc608a27c9340509"
+  },
+  {
+    "id": "src/mosaic/raw.rs:5",
+    "path": "src/mosaic/raw.rs",
+    "line": 355,
+    "symbol": "RootPtr::free_id",
+    "site": "unsafe {",
+    "proof": "layout",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "caeb8094036ba2fe22f1a3bdc67b114d9284deab8df64b36d16c18731d214e9e"
+  },
+  {
+    "id": "src/mosaic/raw.rs:6",
+    "path": "src/mosaic/raw.rs",
+    "line": 366,
+    "symbol": "RootPtr::at",
+    "site": "unsafe fn at<T>(&self, offset: usize, index: usize) -> &T {",
+    "proof": "layout",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "ea35a505e7538a38636b5b46372d7718e37b00682094d37e67c40b11fc0e5991"
+  },
+  {
+    "id": "src/mosaic/raw.rs:7",
+    "path": "src/mosaic/raw.rs",
+    "line": 369,
+    "symbol": "RootPtr::at",
+    "site": "unsafe {",
+    "proof": "layout",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "b2ff637574db63afd231eea3a69fe93ea51a7d66dbaf4ac6c6313a52fb536314"
+  },
+  {
+    "id": "src/mosaic/raw.rs:8",
+    "path": "src/mosaic/raw.rs",
+    "line": 382,
+    "symbol": "RootPtr::word",
+    "site": "unsafe { self.at(self.root().plan.words, index) }",
+    "proof": "layout",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "1783a85cc948ef7bd56efcc0529643a81a20187ab22cda098b7a0f2ec811a5e6"
+  },
+  {
+    "id": "src/mosaic/raw.rs:9",
+    "path": "src/mosaic/raw.rs",
+    "line": 390,
+    "symbol": "RootPtr::unassigned",
+    "site": "unsafe { self.at(self.root().plan.unassigned, index) }",
+    "proof": "layout",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "87e704f402f588181f2f878d2b312b10f094aa36e5b6528886c48871c3434dd0"
+  },
+  {
+    "id": "src/mosaic/raw.rs:10",
+    "path": "src/mosaic/raw.rs",
+    "line": 395,
+    "symbol": "RootPtr::cursor",
+    "site": "unsafe { self.at(self.root().plan.cursors, index) }",
+    "proof": "layout",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "8c0f3eaf2955713e98835b7b5c74c8e0e1b074af598aa07cde9f5dd1ce0f212d"
+  },
+  {
+    "id": "src/mosaic/raw.rs:11",
+    "path": "src/mosaic/raw.rs",
+    "line": 400,
+    "symbol": "RootPtr::entry",
+    "site": "unsafe {",
+    "proof": "layout",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "6a25000584a7f8f95c346e36173c03f1e389820404fe2cca5b9e7028678ca687"
+  },
+  {
+    "id": "src/mosaic/raw.rs:12",
+    "path": "src/mosaic/raw.rs",
+    "line": 410,
+    "symbol": "RootPtr::node",
+    "site": "unsafe { self.at(self.root().plan.nodes, index) }",
+    "proof": "layout",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "d921e2042166b5101c9df261a5c41947a31b496ec11fbbd53948b7f0d4d5d916"
+  },
+  {
+    "id": "src/mosaic/raw.rs:13",
+    "path": "src/mosaic/raw.rs",
+    "line": 415,
+    "symbol": "RootPtr::row_id",
+    "site": "unsafe { self.at(self.root().plan.row_ids, index) }",
+    "proof": "layout",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "4e103e25ae9291f04abea0831a736444a84658e3e5d35459d5b2712383ffacfb"
+  },
+  {
+    "id": "src/mosaic/raw.rs:14",
+    "path": "src/mosaic/raw.rs",
+    "line": 626,
+    "symbol": "RootPtr::recycle_domain",
+    "site": "unsafe { self.free_id(count).write(index) };",
+    "proof": "admission",
+    "checks": [
+      "mosaic-admission",
+      "mosaic-generation",
+      "mosaic-maintenance",
+      "reservations"
+    ],
+    "context_sha256": "9e23fbd01e185551505242389fab27ae3b868862b683f6a5c3152523d21fe6c1"
+  },
+  {
+    "id": "src/mosaic/raw.rs:15",
+    "path": "src/mosaic/raw.rs",
+    "line": 698,
+    "symbol": "RootPtr::destroy",
+    "site": "unsafe {",
+    "proof": "teardown",
+    "checks": [
+      "mosaic-destroy",
+      "mosaic-return"
+    ],
+    "context_sha256": "2d9594cd42350f315befb46f54d8d1d26a5903f7bd34befaa7a39673412d91c3"
+  },
+  {
+    "id": "src/mosaic/raw.rs:16",
+    "path": "src/mosaic/raw.rs",
+    "line": 720,
+    "symbol": "Send for Diagnostics::destroy",
+    "site": "unsafe impl Send for Diagnostics {}",
+    "proof": "diagnostics",
+    "checks": [
+      "mosaic-destroy",
+      "mosaic-return"
+    ],
+    "context_sha256": "758a08a21d088304cee5048fbf73ad6f60b161b8de05ec42260f006461ac765e"
+  },
+  {
+    "id": "src/mosaic/raw.rs:17",
+    "path": "src/mosaic/raw.rs",
+    "line": 722,
+    "symbol": "Sync for Diagnostics::destroy",
+    "site": "unsafe impl Sync for Diagnostics {}",
+    "proof": "diagnostics",
+    "checks": [
+      "mosaic-destroy",
+      "mosaic-return"
+    ],
+    "context_sha256": "827ff83d1237e3fc18f43028ac7b225d50db659ef093e82137274fae34d573cd"
+  },
+  {
+    "id": "src/mosaic/raw.rs:18",
+    "path": "src/mosaic/raw.rs",
+    "line": 736,
+    "symbol": "Diagnostics::record",
+    "site": "unsafe { self.ptr.as_ref() }",
+    "proof": "diagnostics",
+    "checks": [
+      "mosaic-destroy",
+      "mosaic-return"
+    ],
+    "context_sha256": "fc1ec55a7ca5612b6db29ae8fdce655468d6c8d1111b693f5b67b29a8d18d4b9"
+  },
+  {
+    "id": "src/mosaic/raw.rs:19",
+    "path": "src/mosaic/raw.rs",
+    "line": 773,
+    "symbol": "Drop for Diagnostics::drop",
+    "site": "unsafe {",
+    "proof": "diagnostics",
+    "checks": [
+      "mosaic-destroy",
+      "mosaic-return"
+    ],
+    "context_sha256": "a793df81d86e17f57d548c7cf9ef2f20a8b1a266f2287d685a903892378abf9a"
+  },
+  {
+    "id": "src/mosaic/raw.rs:20",
+    "path": "src/mosaic/raw.rs",
+    "line": 782,
+    "symbol": "Drop for Diagnostics::prepare_payload",
+    "site": "unsafe fn prepare_payload(mut ptr: *mut u8, mut len: usize) {",
+    "proof": "preparation",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "c47d0f21d7de1edbca2b8b5284eb806d7c4d59d1b2ee670503ea04c8a1004edb"
+  },
+  {
+    "id": "src/mosaic/raw.rs:21",
+    "path": "src/mosaic/raw.rs",
+    "line": 786,
+    "symbol": "Drop for Diagnostics::prepare_payload",
+    "site": "unsafe {",
+    "proof": "preparation",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "dcc6bfddfef6f8a5824e88681dc1a96e16a4100cc6bccf32c4e083fd47aa79e6"
+  },
+  {
+    "id": "src/mosaic/raw.rs:22",
+    "path": "src/mosaic/raw.rs",
+    "line": 794,
+    "symbol": "Drop for Diagnostics::prepare_payload",
+    "site": "unsafe {",
+    "proof": "preparation",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "b21b6f96e8236152ddb3579a778e3dfa7083de84948ebbddb0351942b8d07d0a"
+  },
+  {
+    "id": "src/mosaic/raw.rs:23",
+    "path": "src/mosaic/raw.rs",
+    "line": 802,
+    "symbol": "Drop for Diagnostics::prepare_payload",
+    "site": "unsafe {",
+    "proof": "preparation",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "484b726f1bd6a7b0dccb05338f70cfbebffaa62622bca044325ec2e2adbd21ae"
+  },
+  {
+    "id": "src/mosaic/raw.rs:24",
+    "path": "src/mosaic/raw.rs",
+    "line": 825,
+    "symbol": "StorageOwner::prepare",
+    "site": "let memory = NonNull::new(unsafe { alloc(plan.layout) }).ok_or(Error::AllocationFailed)?;",
+    "proof": "preparation",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "0f526980dbe527b2b339b1991a980528aa113b5ea36fa7e38916a0ee771b485a"
+  },
+  {
+    "id": "src/mosaic/raw.rs:25",
+    "path": "src/mosaic/raw.rs",
+    "line": 827,
+    "symbol": "StorageOwner::prepare",
+    "site": "let diagnostic = NonNull::new(unsafe { alloc(Layout::new::<DiagnosticRecord>()) });",
+    "proof": "preparation",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "b24eaf7623db6c8298ca3e128090dc8be7c9b5e92277f49cbdb422811239feff"
+  },
+  {
+    "id": "src/mosaic/raw.rs:26",
+    "path": "src/mosaic/raw.rs",
+    "line": 830,
+    "symbol": "StorageOwner::prepare",
+    "site": "unsafe {",
+    "proof": "preparation",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "5a891dc3f79a9ff6c83332e57389cc66db14f1dfbdad68f13eed9e0fda910165"
+  },
+  {
+    "id": "src/mosaic/raw.rs:27",
+    "path": "src/mosaic/raw.rs",
+    "line": 840,
+    "symbol": "StorageOwner::prepare",
+    "site": "unsafe {",
+    "proof": "preparation",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "c33b51dab91657d7cffec561924dede1bab432d3cea4ce77ba39be4ef1cc4da1"
+  },
+  {
+    "id": "src/mosaic/raw.rs:28",
+    "path": "src/mosaic/raw.rs",
+    "line": 1010,
+    "symbol": "StorageOwner::prepare",
+    "site": "unsafe {",
+    "proof": "preparation",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized"
+    ],
+    "context_sha256": "abd7b0a73726bc8a1358f277de6645275f559d4c0f072621cd8ab50547e5e941"
+  },
+  {
+    "id": "src/mosaic/raw.rs:29",
+    "path": "src/mosaic/raw.rs",
+    "line": 1186,
+    "symbol": "Pool::open_inner",
+    "site": "let index = unsafe { self.root.free_id(count - 1).read() };",
+    "proof": "admission",
+    "checks": [
+      "mosaic-admission",
+      "mosaic-generation",
+      "mosaic-maintenance",
+      "reservations"
+    ],
+    "context_sha256": "e26d81a3c3f362c6c6b52f04a87d93521c0835c6ba7727a2f72f8e3f1975d63b"
+  },
+  {
+    "id": "src/mosaic/raw.rs:30",
+    "path": "src/mosaic/raw.rs",
+    "line": 1404,
+    "symbol": "Domain::acquire",
+    "site": "unsafe {",
+    "proof": "admission",
+    "checks": [
+      "mosaic-admission",
+      "mosaic-generation",
+      "mosaic-maintenance",
+      "reservations"
+    ],
+    "context_sha256": "ba062913f16ac9b415a6ca921bd19539f7b0d32064c374c9ed2fc21b7b6ea97a"
+  },
+  {
+    "id": "src/mosaic/raw.rs:31",
+    "path": "src/mosaic/raw.rs",
+    "line": 1497,
+    "symbol": "Send for Lease::drop",
+    "site": "unsafe impl Send for Lease {}",
+    "proof": "ownership",
+    "checks": [
+      "mosaic-initialized",
+      "mosaic-bytes",
+      "mosaic-return",
+      "traits"
+    ],
+    "context_sha256": "891fafeb85353a9b5af18513963a62db0b8d0cfb27dcdb8af1524b08929709df"
+  },
+  {
+    "id": "src/mosaic/raw.rs:32",
+    "path": "src/mosaic/raw.rs",
+    "line": 1500,
+    "symbol": "Sync for Lease::drop",
+    "site": "unsafe impl Sync for Lease {}",
+    "proof": "ownership",
+    "checks": [
+      "mosaic-initialized",
+      "mosaic-bytes",
+      "mosaic-return",
+      "traits"
+    ],
+    "context_sha256": "0b4d1251a7ed4c95c9192909f4f51b014f84be10863bc5065a9d6f4b00d2005c"
+  },
+  {
+    "id": "src/mosaic/raw.rs:33",
+    "path": "src/mosaic/raw.rs",
+    "line": 1512,
+    "symbol": "Lease::origin",
+    "site": "unsafe { *self.slot().origin.get() }",
+    "proof": "ownership",
+    "checks": [
+      "mosaic-initialized",
+      "mosaic-bytes",
+      "mosaic-return",
+      "traits"
+    ],
+    "context_sha256": "c5bb3d13f583bf7bab1903cac7a1672df303847d3e2dfde3cd40d1a79a248a9d"
+  },
+  {
+    "id": "src/mosaic/raw.rs:34",
+    "path": "src/mosaic/raw.rs",
+    "line": 1572,
+    "symbol": "bytes::BufMut for BufMut::drop",
+    "site": "unsafe impl bytes::BufMut for BufMut {",
+    "proof": "ownership",
+    "checks": [
+      "mosaic-initialized",
+      "mosaic-bytes",
+      "mosaic-return",
+      "traits"
+    ],
+    "context_sha256": "b487ad66e978379b38bf278acafd20b77838565b869dc545d48ccf1389de4d25"
+  },
+  {
+    "id": "src/mosaic/raw.rs:35",
+    "path": "src/mosaic/raw.rs",
+    "line": 1580,
+    "symbol": "bytes::BufMut for BufMut::chunk_mut",
+    "site": "unsafe {",
+    "proof": "ownership",
+    "checks": [
+      "mosaic-initialized",
+      "mosaic-bytes",
+      "mosaic-return",
+      "traits"
+    ],
+    "context_sha256": "5f957aafa3b7e4a65b37b1d2e4fc265f27ff0f24f38d4e648b2ddd9ff5222a32"
+  },
+  {
+    "id": "src/mosaic/raw.rs:36",
+    "path": "src/mosaic/raw.rs",
+    "line": 1587,
+    "symbol": "bytes::BufMut for BufMut::advance_mut",
+    "site": "unsafe fn advance_mut(&mut self, count: usize) {",
+    "proof": "ownership",
+    "checks": [
+      "mosaic-initialized",
+      "mosaic-bytes",
+      "mosaic-return",
+      "traits"
+    ],
+    "context_sha256": "1ea5c46c3e2b6756bf99ab48222f09aaa16ca98d98b512de067755eedb40a4cf"
+  },
+  {
+    "id": "src/mosaic/raw.rs:37",
+    "path": "src/mosaic/raw.rs",
+    "line": 1619,
+    "symbol": "BufMut::put_slice",
+    "site": "unsafe {",
+    "proof": "ownership",
+    "checks": [
+      "mosaic-initialized",
+      "mosaic-bytes",
+      "mosaic-return",
+      "traits"
+    ],
+    "context_sha256": "2ab2e1c2fc05ec9b3e8bc3fbf6962d2df725c34aa79d1c641fd94d9ca975fb3e"
+  },
+  {
+    "id": "src/mosaic/raw.rs:38",
+    "path": "src/mosaic/raw.rs",
+    "line": 1637,
+    "symbol": "BufMut::initialize_to",
+    "site": "unsafe {",
+    "proof": "ownership",
+    "checks": [
+      "mosaic-initialized",
+      "mosaic-bytes",
+      "mosaic-return",
+      "traits"
+    ],
+    "context_sha256": "516d0a85609a35e78e5db5ade9de202eb6f3fdad5a27a11c01becc2c8a1eb559"
+  },
+  {
+    "id": "src/mosaic/raw.rs:39",
+    "path": "src/mosaic/raw.rs",
+    "line": 1648,
+    "symbol": "BufMut::initialize_to",
+    "site": "Ok(unsafe { std::slice::from_raw_parts_mut(self.lease.data(), len) })",
+    "proof": "ownership",
+    "checks": [
+      "mosaic-initialized",
+      "mosaic-bytes",
+      "mosaic-return",
+      "traits"
+    ],
+    "context_sha256": "a27702f816d66553c9e73e4445fe446c17747823865944bf253e4383c06a1fad"
+  },
+  {
+    "id": "src/mosaic/raw.rs:40",
+    "path": "src/mosaic/raw.rs",
+    "line": 1670,
+    "symbol": "AsRef<[u8]> for BufMut::as_ref",
+    "site": "unsafe { std::slice::from_raw_parts(self.lease.data(), self.filled) }",
+    "proof": "ownership",
+    "checks": [
+      "mosaic-initialized",
+      "mosaic-bytes",
+      "mosaic-return",
+      "traits"
+    ],
+    "context_sha256": "2a1c02bb6801c0e7928a083e98a833d19cf4566f9a691b8901868a5345ca13c5"
+  },
+  {
+    "id": "src/mosaic/raw.rs:41",
+    "path": "src/mosaic/raw.rs",
+    "line": 1768,
+    "symbol": "AsRef<[u8]> for Buf::as_ref",
+    "site": "unsafe { std::slice::from_raw_parts(self.lease.data().add(self.range.start), self.len()) }",
+    "proof": "ownership",
+    "checks": [
+      "mosaic-initialized",
+      "mosaic-bytes",
+      "mosaic-return",
+      "traits"
+    ],
+    "context_sha256": "1dab8db71e8c00fb59a172f09ae1eb157295dc47410dd6b70e35e68f2fc83c55"
+  },
+  {
+    "id": "src/mosaic/raw.rs:42",
+    "path": "src/mosaic/raw.rs",
+    "line": 2030,
+    "symbol": "Default for DomainMetrics::snapshot",
+    "site": "let origin = unsafe { *slot.origin.get() };",
+    "proof": "observations",
+    "checks": [
+      "snapshots"
+    ],
+    "context_sha256": "504c80a55bf22c3be9477445b0018da61eb7f9830d653fc283785a7fe8bf0ac3"
+  },
+  {
+    "id": "src/mosaic/raw/branches.rs:1",
+    "path": "src/mosaic/raw/branches.rs",
+    "line": 97,
+    "symbol": "Send for Branch::freeze_branches_into",
+    "site": "unsafe impl Send for Branch {}",
+    "proof": "families",
+    "checks": [
+      "branches-layout",
+      "branches-construction",
+      "branches-lifetime",
+      "branch-traces",
+      "traits"
+    ],
+    "context_sha256": "31d93d2c3720f742d3ef97d488a8d156bedc5f7eafdcebd69e7b2c4e4d0cf309"
+  },
+  {
+    "id": "src/mosaic/raw/branches.rs:2",
+    "path": "src/mosaic/raw/branches.rs",
+    "line": 141,
+    "symbol": "FamilyRight::record",
+    "site": "unsafe { self.record.as_ref() }",
+    "proof": "families",
+    "checks": [
+      "branches-layout",
+      "branches-construction",
+      "branches-lifetime",
+      "branch-traces",
+      "traits"
+    ],
+    "context_sha256": "bfbfa2904dc446c3ff38caab11be7b239a2bd8647db1e3f7031c9857f446be40"
+  },
+  {
+    "id": "src/mosaic/raw/branches.rs:3",
+    "path": "src/mosaic/raw/branches.rs",
+    "line": 193,
+    "symbol": "LocalBuf::origin",
+    "site": "unsafe {",
+    "proof": "families",
+    "checks": [
+      "branches-layout",
+      "branches-construction",
+      "branches-lifetime",
+      "branch-traces",
+      "traits"
+    ],
+    "context_sha256": "4efd55548e19bed40a7c0f2de766d92d1d31ada6aadc3e4d9833d51789399baf"
+  },
+  {
+    "id": "src/mosaic/raw/branches.rs:4",
+    "path": "src/mosaic/raw/branches.rs",
+    "line": 245,
+    "symbol": "AsRef<[u8]> for LocalBuf::as_ref",
+    "site": "unsafe { std::slice::from_raw_parts(self.right.data().add(self.range.start), self.len()) }",
+    "proof": "families",
+    "checks": [
+      "branches-layout",
+      "branches-construction",
+      "branches-lifetime",
+      "branch-traces",
+      "traits"
+    ],
+    "context_sha256": "13b9c58ee56710f69f549652cd47acc5f01c144d8685dfbbcd2205e25b09bc05"
+  },
+  {
+    "id": "src/mosaic/raw/remote.rs:1",
+    "path": "src/mosaic/raw/remote.rs",
+    "line": 17,
+    "symbol": "RemotePtr::plan",
+    "site": "unsafe { &*std::ptr::addr_of!((*self.0.as_ptr()).plan) }",
+    "proof": "remote",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized",
+      "mosaic-return",
+      "branches-lifetime",
+      "traits"
+    ],
+    "context_sha256": "bc717ef67ada84969acb643dda6089dad2e3bdc41765b57baa7bee39b5996128"
+  },
+  {
+    "id": "src/mosaic/raw/remote.rs:2",
+    "path": "src/mosaic/raw/remote.rs",
+    "line": 21,
+    "symbol": "RemotePtr::reference_limit",
+    "site": "unsafe { (*self.0.as_ptr()).reference_limit }",
+    "proof": "remote",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized",
+      "mosaic-return",
+      "branches-lifetime",
+      "traits"
+    ],
+    "context_sha256": "48581dc779bc4561b4562b4ac3e7c7a968587c48643a4e6e83f57cacd4bf2927"
+  },
+  {
+    "id": "src/mosaic/raw/remote.rs:3",
+    "path": "src/mosaic/raw/remote.rs",
+    "line": 28,
+    "symbol": "RemotePtr::slot",
+    "site": "unsafe {",
+    "proof": "remote",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized",
+      "mosaic-return",
+      "branches-lifetime",
+      "traits"
+    ],
+    "context_sha256": "05c702e329e956353431745109cf01a0222146bc8995f70c116f752b57be7a69"
+  },
+  {
+    "id": "src/mosaic/raw/remote.rs:4",
+    "path": "src/mosaic/raw/remote.rs",
+    "line": 40,
+    "symbol": "RemotePtr::class",
+    "site": "let count = unsafe { (*self.0.as_ptr()).class_count };",
+    "proof": "remote",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized",
+      "mosaic-return",
+      "branches-lifetime",
+      "traits"
+    ],
+    "context_sha256": "0bebfd13e3e1f83f9000f142595ef5a507c830f639724b615f98aba7785f3692"
+  },
+  {
+    "id": "src/mosaic/raw/remote.rs:5",
+    "path": "src/mosaic/raw/remote.rs",
+    "line": 43,
+    "symbol": "RemotePtr::class",
+    "site": "unsafe {",
+    "proof": "remote",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized",
+      "mosaic-return",
+      "branches-lifetime",
+      "traits"
+    ],
+    "context_sha256": "9d6499febddcce9062089a524914a185e29be818c1d7c799d039779b0384a574"
+  },
+  {
+    "id": "src/mosaic/raw/remote.rs:6",
+    "path": "src/mosaic/raw/remote.rs",
+    "line": 55,
+    "symbol": "RemotePtr::ledger",
+    "site": "let count = unsafe { (*self.0.as_ptr()).domain_count };",
+    "proof": "remote",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized",
+      "mosaic-return",
+      "branches-lifetime",
+      "traits"
+    ],
+    "context_sha256": "0e24987eaedde38b8959d5b1c7ff8eb5afff484101b97addcf226b0d2e274607"
+  },
+  {
+    "id": "src/mosaic/raw/remote.rs:7",
+    "path": "src/mosaic/raw/remote.rs",
+    "line": 60,
+    "symbol": "RemotePtr::ledger",
+    "site": "unsafe {",
+    "proof": "remote",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized",
+      "mosaic-return",
+      "branches-lifetime",
+      "traits"
+    ],
+    "context_sha256": "d9fbb37dd1f5aa53852f0e6e812c88f9bd9419ecebe699c71848795e5613ae7a"
+  },
+  {
+    "id": "src/mosaic/raw/remote.rs:8",
+    "path": "src/mosaic/raw/remote.rs",
+    "line": 74,
+    "symbol": "RemotePtr::word",
+    "site": "unsafe {",
+    "proof": "remote",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized",
+      "mosaic-return",
+      "branches-lifetime",
+      "traits"
+    ],
+    "context_sha256": "60c4844c6b67fb2a23e89ce246619b84cf7cd81f633bbf8bbcb4fbcb1971f017"
+  },
+  {
+    "id": "src/mosaic/raw/remote.rs:9",
+    "path": "src/mosaic/raw/remote.rs",
+    "line": 87,
+    "symbol": "RemotePtr::data",
+    "site": "unsafe {",
+    "proof": "remote",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized",
+      "mosaic-return",
+      "branches-lifetime",
+      "traits"
+    ],
+    "context_sha256": "12c8c4cea92d228822ccef9f445bf7d4c2749e2d493fcbda2f64c6e9987c1ef0"
+  },
+  {
+    "id": "src/mosaic/raw/remote.rs:10",
+    "path": "src/mosaic/raw/remote.rs",
+    "line": 105,
+    "symbol": "RemotePtr::branch_record",
+    "site": "unsafe {",
+    "proof": "remote",
+    "checks": [
+      "mosaic-layout",
+      "mosaic-initialized",
+      "mosaic-return",
+      "branches-lifetime",
+      "traits"
+    ],
+    "context_sha256": "46232f9721ec7b568857af2f74a8fa9c25e6e0d66e6b278c9815815db1864d53"
+  }
+]

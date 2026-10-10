@@ -1,0 +1,3361 @@
+{
+  "schema": 2,
+  "tools": {
+    "rust": "1.96.0",
+    "nightly": "nightly-2026-10-03",
+    "llvm-cov": "0.9.1",
+    "fuzz": "0.13.2",
+    "mutants": "27.1.0"
+  },
+  "checks": [
+    {
+      "id": "berry-admission",
+      "invariants": [
+        "MEM-01",
+        "MEM-02",
+        "OWN-03"
+      ],
+      "selector": "berry::raw::tests::mem02_own03_every_guarded_admission_fault_restores_resources",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-return",
+      "invariants": [
+        "AP-02",
+        "AP-03",
+        "LIFE-02"
+      ],
+      "selector": "berry::raw::tests::old_return_after_reuse_refunds_only_its_origin_and_pins_shutdown",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-destroy",
+      "invariants": [
+        "AP-03",
+        "LIFE-02"
+      ],
+      "selector": "berry::raw::tests::cold_teardown_observes_final_return_without_thread_join",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-initialized",
+      "invariants": [
+        "OWN-01",
+        "OWN-03"
+      ],
+      "selector": "berry::raw::tests::initialization_and_neighboring_live_references",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-bytes",
+      "invariants": [
+        "OWN-01",
+        "IO-01"
+      ],
+      "selector": "berry::raw::tests::bytes_cursor_commits_only_written_prefix_and_cannot_cross_neighbor",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-generation",
+      "invariants": [
+        "LIFE-01"
+      ],
+      "selector": "berry::raw::tests::generation_exhaustion_retires_record",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-maintenance",
+      "invariants": [
+        "LIFE-01",
+        "SI-07"
+      ],
+      "selector": "berry::raw::tests::maintenance_is_bounded_fair_and_snapshots_do_not_reap",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-checked_clone_races_with_nonfinal_release",
+      "invariants": [
+        "OWN-02",
+        "OWN-03"
+      ],
+      "selector": "berry::protocol::tests::checked_clone_races_with_nonfinal_release",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "berry-final_reader_happens_before_overwrite_without_join_synchronization",
+      "invariants": [
+        "OWN-03",
+        "AP-02"
+      ],
+      "selector": "berry::protocol::tests::final_reader_happens_before_overwrite_without_join_synchronization",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "berry-si10_batch_rollback_races_with_release_without_returning_original",
+      "invariants": [
+        "SI-10",
+        "OWN-02"
+      ],
+      "selector": "berry::protocol::tests::si10_batch_rollback_races_with_release_without_returning_original",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "berry-domain_completion_gates_new_identity_without_join_synchronization",
+      "invariants": [
+        "LIFE-01",
+        "AP-03"
+      ],
+      "selector": "berry::protocol::tests::domain_completion_gates_new_identity_without_join_synchronization",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "mosaic-admission",
+      "invariants": [
+        "MEM-01",
+        "MEM-02",
+        "OWN-03"
+      ],
+      "selector": "mosaic::raw::tests::mem02_own03_every_guarded_admission_fault_restores_resources",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-return",
+      "invariants": [
+        "AP-02",
+        "AP-03",
+        "LIFE-02"
+      ],
+      "selector": "mosaic::raw::tests::si11_reissue_before_refund_cannot_credit_new_origin_or_destroy_root",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-destroy",
+      "invariants": [
+        "AP-03",
+        "LIFE-02"
+      ],
+      "selector": "mosaic::raw::tests::si11_teardown_after_refund_without_join_synchronization",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-initialized",
+      "invariants": [
+        "OWN-01",
+        "OWN-03"
+      ],
+      "selector": "mosaic::raw::tests::si14_borrow_initialization_neighbor_bounds_and_batch_unwind",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-bytes",
+      "invariants": [
+        "OWN-01",
+        "IO-01"
+      ],
+      "selector": "mosaic::raw::tests::si14_bytes_cursor_preserves_tail_and_initialization",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-generation",
+      "invariants": [
+        "LIFE-01"
+      ],
+      "selector": "mosaic::raw::tests::si11_generation_retires_without_reassigning_old_identity",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-maintenance",
+      "invariants": [
+        "LIFE-01",
+        "SI-07"
+      ],
+      "selector": "mosaic::raw::tests::si16_maintenance_is_bounded_fair_and_not_a_snapshot_side_effect",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-checked_clone_races_with_nonfinal_release",
+      "invariants": [
+        "OWN-02",
+        "OWN-03"
+      ],
+      "selector": "mosaic::protocol::tests::checked_clone_races_with_nonfinal_release",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "mosaic-final_reader_happens_before_overwrite_without_join_synchronization",
+      "invariants": [
+        "OWN-03",
+        "AP-02"
+      ],
+      "selector": "mosaic::protocol::tests::final_reader_happens_before_overwrite_without_join_synchronization",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "mosaic-si10_batch_rollback_races_with_release_without_returning_original",
+      "invariants": [
+        "SI-10",
+        "OWN-02"
+      ],
+      "selector": "mosaic::protocol::tests::si10_batch_rollback_races_with_release_without_returning_original",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "mosaic-domain_completion_gates_new_identity_without_join_synchronization",
+      "invariants": [
+        "LIFE-01",
+        "AP-03"
+      ],
+      "selector": "mosaic::protocol::tests::domain_completion_gates_new_identity_without_join_synchronization",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "berry-depleted",
+      "invariants": [
+        "SI-01",
+        "AP-08"
+      ],
+      "selector": "berry::protocol::tests::si01_confirmation_rechecks_a_stale_empty_hint",
+      "features": "loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "mosaic-depleted",
+      "invariants": [
+        "SI-12",
+        "AP-08"
+      ],
+      "selector": "mosaic::protocol::tests::si12_confirmation_finds_a_publication_hidden_by_an_earlier_load",
+      "features": "mosaic-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "mosaic-layout",
+      "invariants": [
+        "MEM-01",
+        "SI-13"
+      ],
+      "selector": "mosaic::raw::tests::si13_sparse_metadata_bound_and_transactional_open",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-layout",
+      "invariants": [
+        "MEM-01",
+        "SI-05"
+      ],
+      "selector": "berry::raw::tests::reserved_layout_counts_matrix_padding_and_checks_overflow_before_allocation",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "branches-construction",
+      "invariants": [
+        "BR-01",
+        "OWN-02"
+      ],
+      "selector": "mosaic::raw::branches::tests::br01_unwind_at_every_materialization_prefix_releases_all_rights",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "branches-layout",
+      "invariants": [
+        "BR-04",
+        "MEM-01"
+      ],
+      "selector": "mosaic::raw::branches::tests::br04_prepared_records_are_charged_and_layout_checked",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "branches-lifetime",
+      "invariants": [
+        "BR-03",
+        "AP-06"
+      ],
+      "selector": "mosaic::protocol::tests::local_branches::br03_local_readers_happen_before_slot_and_sidecar_reuse_without_join",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "differential",
+      "invariants": [
+        "MEM-01",
+        "MEM-02",
+        "OWN-01",
+        "OWN-02",
+        "LIFE-01"
+      ],
+      "selector": "mem_own_life_same_trace_matches_all_backends",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "model"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "fuzz",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "reservations",
+      "invariants": [
+        "SI-05",
+        "SI-13"
+      ],
+      "selector": "reservations::",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "model"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "branch-traces",
+      "invariants": [
+        "BR-01",
+        "BR-02",
+        "BR-03"
+      ],
+      "selector": "four_ledgers_survive_local_sequences",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "local_branches"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "fuzz",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "snapshots",
+      "invariants": [
+        "AP-01",
+        "AP-05"
+      ],
+      "selector": "remote_freeze_clone_drop_then_issuer_reuse",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "issuer_snapshots"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "traits",
+      "invariants": [
+        "AP-01",
+        "BR-02"
+      ],
+      "selector": "boundaries",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "issuer_traits"
+      ],
+      "tools": [
+        "native"
+      ],
+      "critical": true
+    },
+    {
+      "id": "stress",
+      "invariants": [
+        "MEM-02",
+        "OWN-03",
+        "LIFE-02"
+      ],
+      "selector": "own03_life02_repeated_slot_and_remote_domain_churn",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "issuer_stress"
+      ],
+      "tools": [
+        "native",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "tcp",
+      "invariants": [
+        "IO-01",
+        "IO-02",
+        "IO-03"
+      ],
+      "selector": "io0",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "tcp"
+      ],
+      "tools": [
+        "native"
+      ],
+      "critical": true
+    },
+    {
+      "id": "branches-io-origin",
+      "invariants": [
+        "BR-03",
+        "BR-05",
+        "MEM-03",
+        "OWN-01"
+      ],
+      "selector": "mosaic::raw::branches::tests::br05_borrowed_io_views_keep_origin_and_filled_bounds_through_reuse",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "branches-stress",
+      "invariants": [
+        "BR-02",
+        "BR-03",
+        "LIFE-02"
+      ],
+      "selector": "br03_remote_families_repeatedly_reuse_one_sidecar_set",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "issuer_stress"
+      ],
+      "tools": [
+        "native",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-grant-preflight",
+      "invariants": [
+        "SI-09",
+        "MEM-01"
+      ],
+      "selector": "berry::grants::tests::si09_rejects_oversized_input_before_reading_classes_or_writing_scratch",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-grant-preflight",
+      "invariants": [
+        "SI-09",
+        "MEM-01"
+      ],
+      "selector": "mosaic::grants::tests::si09_rejects_oversized_input_before_reading_classes_or_writing_scratch",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-grant-work",
+      "invariants": [
+        "SI-09",
+        "PROG-04"
+      ],
+      "selector": "berry::grants::tests::si09_invalid_grants_fail_with_bounded_class_reads",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-grant-work",
+      "invariants": [
+        "SI-09",
+        "PROG-04"
+      ],
+      "selector": "mosaic::grants::tests::si09_invalid_grants_fail_with_bounded_class_reads",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native"
+      ],
+      "critical": true
+    },
+    {
+      "id": "reference-acquire-configuration",
+      "invariants": [
+        "OWN-03",
+        "AP-09"
+      ],
+      "selector": "verification_config::reference_acquire_mode_matches_campaign",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "asan",
+        "tsan",
+        "msan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "branches-destroy-before-join",
+      "invariants": [
+        "BR-03",
+        "AP-03",
+        "LIFE-02"
+      ],
+      "selector": "mosaic::raw::branches::tests::br03_remote_families_allow_teardown_before_worker_join",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-all-class-faults",
+      "selector": "berry::raw::tests::conservation::abps_all_class_faults_preserve_neighbors_and_rights",
+      "invariants": [
+        "MEM-02",
+        "OWN-01",
+        "OWN-03"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-failure-idempotence",
+      "selector": "berry::raw::tests::conservation::abps_failure_idempotence_and_exact_budget_boundary",
+      "invariants": [
+        "MEM-02",
+        "LIFE-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-return-reincarnation",
+      "selector": "berry::raw::tests::conservation::abps_publish_refund_budget_and_single_record_reincarnation",
+      "invariants": [
+        "AP-02",
+        "LIFE-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-reference-boundary",
+      "selector": "berry::raw::tests::conservation::abps_reference_limit_scalar_batch_and_zero_length_views",
+      "invariants": [
+        "OWN-02",
+        "SI-10"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-all-class-faults",
+      "selector": "mosaic::raw::tests::conservation::abps_all_class_faults_preserve_neighbors_and_rights",
+      "invariants": [
+        "MEM-02",
+        "OWN-01",
+        "OWN-03"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-failure-idempotence",
+      "selector": "mosaic::raw::tests::conservation::abps_failure_idempotence_and_exact_budget_boundary",
+      "invariants": [
+        "MEM-02",
+        "LIFE-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-return-reincarnation",
+      "selector": "mosaic::raw::tests::conservation::abps_publish_refund_budget_and_single_record_reincarnation",
+      "invariants": [
+        "AP-02",
+        "LIFE-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-reference-boundary",
+      "selector": "mosaic::raw::tests::conservation::abps_reference_limit_scalar_batch_and_zero_length_views",
+      "invariants": [
+        "OWN-02",
+        "SI-10"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-partition",
+      "selector": "berry::raw::tests::conservation::abps_grant_partition_survives_partial_open_and_pending_recycle",
+      "invariants": [
+        "SI-05",
+        "LIFE-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-partition",
+      "selector": "mosaic::raw::tests::partitions::abps_fragmented_multiclass_partition_transaction_and_negative_controls",
+      "invariants": [
+        "SI-13",
+        "LIFE-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-node-capacity",
+      "selector": "mosaic::raw::tests::partitions::abps_sparse_partition_at_node_capacity_and_across_pending_returns",
+      "invariants": [
+        "SI-13",
+        "LIFE-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "preparation-equivalence",
+      "selector": "mosaic::raw::tests::partitions::abps_lazy_and_zero_preparation_have_identical_safe_observations",
+      "invariants": [
+        "SI-13",
+        "SI-17"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "word-boundaries",
+      "selector": "mosaic::raw::tests::si12_word_boundaries_exact_exhaustion_and_no_padding_slot",
+      "invariants": [
+        "SI-12"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-depleted-witness",
+      "selector": "mosaic::protocol::tests::abps_depleted_witness_before_or_after_first_confirmation",
+      "invariants": [
+        "SI-12",
+        "PROG-02"
+      ],
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "adversarial-pressure",
+      "selector": "abps_critical_pressure_states_and_explicit_maintenance",
+      "invariants": [
+        "MEM-02",
+        "OWN-02",
+        "LIFE-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "adversarial"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "adversarial-generated",
+      "selector": "abps_biased_concrete_histories",
+      "invariants": [
+        "MEM-02",
+        "OWN-02",
+        "LIFE-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "adversarial"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "trace-replay-shrink",
+      "selector": "abps_concrete_trace_roundtrip_replay_and_dependency_preserving_shrink",
+      "invariants": [
+        "MEM-02",
+        "OWN-02",
+        "LIFE-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "adversarial"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "oracle-sensitivity",
+      "selector": "abps_oracle_negative_controls_reject_lost_rights_and_early_refund",
+      "invariants": [
+        "MEM-02",
+        "OWN-02",
+        "LIFE-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "adversarial"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "metamorphic",
+      "selector": "abps_metamorphic_snapshots_zero_poll_batch_split_and_write_composition",
+      "invariants": [
+        "MEM-02",
+        "OWN-02",
+        "LIFE-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "adversarial"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "permutations-budget",
+      "selector": "abps_drop_permutations_and_budget_monotonic_prefixes",
+      "invariants": [
+        "MEM-02",
+        "OWN-02",
+        "LIFE-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "adversarial"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "adapter-credits",
+      "selector": "spike_support::network::worker_fanout::tests::abps_queue_credit_conservation_at_every_cancellation_stage",
+      "invariants": [
+        "AP-07",
+        "BR-03"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "adapter-stale-generation",
+      "selector": "spike_support::network::worker_fanout::tests::ap07_stale_generation_drops_old_ownership_without_refunding_new_credits",
+      "invariants": [
+        "AP-07",
+        "SI-16"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "borrow-lifetime",
+      "selector": "mosaic::raw::BufView",
+      "invariants": [
+        "OWN-02",
+        "SI-14"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--doc"
+      ],
+      "tools": [
+        "native"
+      ],
+      "critical": true
+    },
+    {
+      "id": "branch-type-contract",
+      "selector": "mosaic::raw::branches::LocalBuf",
+      "invariants": [
+        "BR-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--doc"
+      ],
+      "tools": [
+        "native"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-abandonment",
+      "selector": "berry::raw::tests::abandonment_is_observable_and_never_tears_down_in_buffer_drop",
+      "invariants": [
+        "LIFE-02",
+        "AP-04"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-abandonment",
+      "selector": "mosaic::raw::tests::si11_forget_and_early_owner_drop_are_observable_not_reclamation",
+      "invariants": [
+        "LIFE-02",
+        "AP-04"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "branches-local-reference",
+      "selector": "mosaic::raw::branches::tests::br02_checked_cell_transition_and_limit",
+      "invariants": [
+        "BR-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-partition-detector",
+      "selector": "berry::raw::tests::conservation::abps_grant_assignment_detector_has_no_destructor_cleanup",
+      "invariants": [
+        "SI-05"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-fault-close-reopen",
+      "selector": "berry::raw::tests::conservation::abps_fault_close_remote_return_reopen_preserves_neighbor",
+      "invariants": [
+        "MEM-02",
+        "OWN-03",
+        "LIFE-02",
+        "SI-05"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan",
+        "msan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-fault-close-reopen",
+      "selector": "mosaic::raw::tests::conservation::abps_fault_close_remote_return_reopen_preserves_neighbor",
+      "invariants": [
+        "MEM-02",
+        "OWN-03",
+        "LIFE-02",
+        "SI-05"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan",
+        "msan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "bounded-search-paths",
+      "selector": "mosaic::raw::tests::abps_search_success_and_masked_failure_have_bounded_work",
+      "invariants": [
+        "SI-12",
+        "AP-08"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan",
+        "msan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "defect-identity",
+      "selector": "abps_shrinking_preserves_defect_identity_not_panic_text",
+      "invariants": [
+        "AP-09"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "adversarial"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan",
+        "msan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "boundary-error-histories",
+      "selector": "abps_boundary_histories_preserve_errors_isolation_and_recycling",
+      "invariants": [
+        "MEM-02",
+        "OWN-01",
+        "LIFE-02",
+        "SI-05"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "adversarial"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan",
+        "msan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "scripted-ingress",
+      "selector": "spike_support::network::ingress::tests::abps_scripted_ingress_errors_wakeups_and_cancellation_preserve_prefix",
+      "invariants": [
+        "IO-01",
+        "OWN-01",
+        "SI-04"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native",
+        "asan",
+        "tsan",
+        "msan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "scripted-writer",
+      "selector": "spike_support::network::writer::tests::abps_scripted_writer_error_cleanup_preserves_exact_wire_prefix",
+      "invariants": [
+        "IO-02",
+        "SI-04",
+        "BR-06"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native",
+        "asan",
+        "tsan",
+        "msan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-batch-boundaries",
+      "invariants": [
+        "SI-10",
+        "OWN-02",
+        "OWN-03"
+      ],
+      "selector": "berry::raw::tests::conservation::abps_batch_boundaries_conserve_handles_pending_and_source",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-retirement-pending",
+      "invariants": [
+        "LIFE-01",
+        "LIFE-02",
+        "SI-05"
+      ],
+      "selector": "berry::raw::tests::conservation::abps_generation_retirement_waits_for_closed_domain_returns",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-generation-chain",
+      "invariants": [
+        "OWN-03",
+        "SI-10"
+      ],
+      "selector": "berry::protocol::tests::generations::batch_release_chain_reinitializes_one_slot_without_join",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "berry-generation-clone",
+      "invariants": [
+        "OWN-02",
+        "OWN-03"
+      ],
+      "selector": "berry::protocol::tests::generations::live_clone_source_survives_peer_release_and_next_generation",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "mosaic-batch-boundaries",
+      "invariants": [
+        "SI-10",
+        "OWN-02",
+        "OWN-03"
+      ],
+      "selector": "mosaic::raw::tests::conservation::abps_batch_boundaries_conserve_handles_pending_and_source",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-retirement-pending",
+      "invariants": [
+        "LIFE-01",
+        "LIFE-02",
+        "SI-05"
+      ],
+      "selector": "mosaic::raw::tests::conservation::abps_generation_retirement_waits_for_closed_domain_returns",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-generation-chain",
+      "invariants": [
+        "OWN-03",
+        "SI-10"
+      ],
+      "selector": "mosaic::protocol::tests::generations::batch_release_chain_reinitializes_one_slot_without_join",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "mosaic-generation-clone",
+      "invariants": [
+        "OWN-02",
+        "OWN-03"
+      ],
+      "selector": "mosaic::protocol::tests::generations::live_clone_source_survives_peer_release_and_next_generation",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "berry-positive-hint",
+      "invariants": [
+        "SI-01",
+        "PROG-02"
+      ],
+      "selector": "berry::protocol::tests::si01_positive_hint_survives_only_remote_publications",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "berry-depletion-witness",
+      "invariants": [
+        "SI-01",
+        "PROG-02"
+      ],
+      "selector": "berry::protocol::tests::si01_depleted_witness_allows_a_later_publication",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "berry-closed-drain",
+      "invariants": [
+        "LIFE-01",
+        "LIFE-02",
+        "SI-05"
+      ],
+      "selector": "berry::protocol::tests::closed_two_allocation_drain_gates_record_reuse_before_join",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "berry-logical-grant-sets",
+      "invariants": [
+        "SI-05",
+        "SI-13",
+        "MEM-02",
+        "LIFE-01"
+      ],
+      "selector": "berry::raw::tests::grant_histories::grant_histories_",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-layout-ranges",
+      "invariants": [
+        "MEM-01",
+        "OWN-03"
+      ],
+      "selector": "berry::raw::tests::layouts::layout_ranges_are_disjoint_aligned_and_fully_charged",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-logical-grant-sets",
+      "invariants": [
+        "SI-05",
+        "SI-13",
+        "MEM-02",
+        "LIFE-01"
+      ],
+      "selector": "mosaic::raw::tests::partitions::histories::grant_histories_",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-layout-ranges",
+      "invariants": [
+        "MEM-01",
+        "OWN-03"
+      ],
+      "selector": "mosaic::raw::tests::layouts::layout_ranges_are_disjoint_aligned_and_fully_charged",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "configuration-boundaries",
+      "invariants": [
+        "MEM-01",
+        "OWN-01"
+      ],
+      "selector": "configuration",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "configuration"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-preflight",
+      "invariants": [
+        "SI-13"
+      ],
+      "selector": "mosaic::raw::tests::partitions::sparse_preflight_assertions_precede_all_mutation",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-root-all-ledgers",
+      "invariants": [
+        "SI-11",
+        "LIFE-02"
+      ],
+      "selector": "mosaic::protocol::tests::si11_root_drain_covers_last_domain_and_all_refunds_without_join",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ]
+    },
+    {
+      "id": "mosaic-masked-cursors",
+      "invariants": [
+        "SI-12"
+      ],
+      "selector": "mosaic::protocol::tests::si12_masked_observations_preserve_neighbors_for_every_cursor",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ]
+    },
+    {
+      "id": "branch-incarnations",
+      "invariants": [
+        "BR-03",
+        "BR-04",
+        "OWN-01"
+      ],
+      "selector": "mosaic::raw::branches::tests::branch_record_incarnations_one_two_one_preserve_lifetime_and_initialization",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-remote-authority",
+      "invariants": [
+        "AP-01",
+        "AP-02",
+        "AP-03",
+        "AP-05",
+        "OWN-03",
+        "SI-11"
+      ],
+      "selector": "mosaic::raw::tests::ap01_remote_authority_publish_reuse_refund_preserves_new_metadata",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-fifo-complete",
+      "invariants": [
+        "LIFE-01",
+        "LIFE-02",
+        "SI-05"
+      ],
+      "selector": "berry::raw::tests::conservation::abps_all_records_close_remote_permutations_and_one_record_poll",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-fifo-complete",
+      "invariants": [
+        "LIFE-01",
+        "LIFE-02",
+        "SI-05"
+      ],
+      "selector": "mosaic::raw::tests::conservation::abps_all_records_close_remote_permutations_and_one_record_poll",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "branches-transfer-boundaries",
+      "invariants": [
+        "BR-01",
+        "BR-03",
+        "SI-11",
+        "OWN-03"
+      ],
+      "selector": "mosaic::raw::branches::tests::br01_source_reserved_staged_and_installed_boundaries_conserve_rights",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "mosaic-cursor-locality",
+      "invariants": [
+        "SI-12",
+        "SI-13",
+        "OWN-03"
+      ],
+      "selector": "mosaic::raw::tests::si12_cursor_retains_winning_word_then_wraps_without_losing_capacity",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    }
+  ],
+  "intentional_retention": [
+    "berry::raw::tests::abandonment_is_observable_and_never_tears_down_in_buffer_drop",
+    "berry::raw::tests::forgotten_buffer_keeps_charge_and_owner_forget_runs_no_diagnostic",
+    "berry::raw::tests::ap04_owner_drop_races_final_return_without_delegating_teardown",
+    "mosaic::raw::tests::si11_forget_and_early_owner_drop_are_observable_not_reclamation",
+    "mosaic::raw::tests::ap04_owner_drop_races_final_return_without_delegating_teardown",
+    "mosaic::raw::branches::tests::br05_forget_pins_full_charge_and_owner_drop_abandons",
+    "mosaic::raw::branches::tests::br05_close_and_early_owner_drop_preserve_readers_and_neighbor_slot",
+    "backends::reference::reservations::forgotten_buffer_pins_grant_and_abandonment_remains_safe",
+    "backends::berry::reservations::forgotten_buffer_pins_grant_and_abandonment_remains_safe",
+    "backends::mosaic::reservations::forgotten_buffer_pins_grant_and_abandonment_remains_safe"
+  ],
+  "allocation_probes": [
+    {
+      "id": "reference-control",
+      "example": "perf_alloc",
+      "arguments": [
+        "--iterations=1000"
+      ],
+      "invariants": [
+        "MEM-01"
+      ]
+    },
+    {
+      "id": "berry",
+      "example": "spike_alloc",
+      "arguments": [
+        "--iterations=1000"
+      ],
+      "invariants": [
+        "SI-01",
+        "SI-10"
+      ]
+    },
+    {
+      "id": "mosaic",
+      "example": "spike_alloc",
+      "arguments": [
+        "--backend=mosaic",
+        "--iterations=1000"
+      ],
+      "invariants": [
+        "SI-11",
+        "SI-12",
+        "SI-14"
+      ]
+    },
+    {
+      "id": "branches",
+      "example": "branches_alloc",
+      "arguments": [
+        "--iterations=1000"
+      ],
+      "invariants": [
+        "BR-04",
+        "AP-06"
+      ]
+    },
+    {
+      "id": "worker-fanout",
+      "example": "spike_alloc",
+      "arguments": [
+        "--backend=mosaic",
+        "--case=worker-fanout",
+        "--iterations=1000"
+      ],
+      "invariants": [
+        "AP-07"
+      ]
+    }
+  ],
+  "negative_controls": [
+    {
+      "id": "berry-lost-publication",
+      "kind": "mutation",
+      "checks": [
+        "berry-failure-idempotence"
+      ]
+    },
+    {
+      "id": "berry-relaxed-publication",
+      "kind": "mutation",
+      "checks": [
+        "berry-final_reader_happens_before_overwrite_without_join_synchronization"
+      ]
+    },
+    {
+      "id": "berry-lost-refund",
+      "kind": "mutation",
+      "checks": [
+        "berry-failure-idempotence"
+      ]
+    },
+    {
+      "id": "berry-lost-reference-release",
+      "kind": "mutation",
+      "checks": [
+        "berry-si10_batch_rollback_races_with_release_without_returning_original"
+      ]
+    },
+    {
+      "id": "berry-repeated-generation",
+      "kind": "mutation",
+      "checks": [
+        "berry-return-reincarnation"
+      ]
+    },
+    {
+      "id": "berry-stale-initialization",
+      "kind": "mutation",
+      "checks": [
+        "berry-all-class-faults"
+      ]
+    },
+    {
+      "id": "mosaic-lost-publication",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-failure-idempotence"
+      ]
+    },
+    {
+      "id": "mosaic-relaxed-publication",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-final_reader_happens_before_overwrite_without_join_synchronization"
+      ]
+    },
+    {
+      "id": "mosaic-lost-refund",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-failure-idempotence"
+      ]
+    },
+    {
+      "id": "mosaic-lost-reference-release",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-si10_batch_rollback_races_with_release_without_returning_original"
+      ]
+    },
+    {
+      "id": "mosaic-repeated-generation",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-return-reincarnation"
+      ]
+    },
+    {
+      "id": "mosaic-stale-initialization",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-all-class-faults"
+      ]
+    },
+    {
+      "id": "berry-lost-root-claim",
+      "kind": "mutation",
+      "checks": [
+        "berry-all-class-faults"
+      ]
+    },
+    {
+      "id": "berry-duplicate-grant",
+      "kind": "mutation",
+      "checks": [
+        "berry-partition-detector"
+      ]
+    },
+    {
+      "id": "mosaic-duplicate-grant",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-partition"
+      ]
+    },
+    {
+      "id": "adapter-lost-queue-credit",
+      "kind": "mutation",
+      "checks": [
+        "adapter-credits"
+      ]
+    },
+    {
+      "id": "oracle-invalid-rights",
+      "kind": "oracle-rejection",
+      "checks": [
+        "oracle-sensitivity"
+      ]
+    },
+    {
+      "id": "partition-corrupt-sample",
+      "kind": "oracle-rejection",
+      "checks": [
+        "mosaic-partition"
+      ]
+    },
+    {
+      "id": "borrow-escape-rejected",
+      "kind": "compile-fail",
+      "checks": [
+        "borrow-lifetime"
+      ]
+    },
+    {
+      "id": "local-transfer-rejected",
+      "kind": "compile-fail",
+      "checks": [
+        "branch-type-contract",
+        "traits"
+      ]
+    },
+    {
+      "id": "branch-missing-local-increment",
+      "kind": "mutation",
+      "checks": [
+        "branches-local-reference"
+      ]
+    },
+    {
+      "id": "batch-lost-guard-rights",
+      "kind": "mutation",
+      "checks": [
+        "branches-construction"
+      ]
+    },
+    {
+      "id": "berry-lost-batch-reservation",
+      "kind": "mutation",
+      "checks": [
+        "berry-si10_batch_rollback_races_with_release_without_returning_original"
+      ]
+    },
+    {
+      "id": "berry-relaxed-publication-acquire-load",
+      "kind": "mutation",
+      "checks": [
+        "berry-final_reader_happens_before_overwrite_without_join_synchronization"
+      ]
+    },
+    {
+      "id": "mosaic-lost-batch-reservation",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-si10_batch_rollback_races_with_release_without_returning_original"
+      ]
+    },
+    {
+      "id": "mosaic-relaxed-publication-acquire-load",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-final_reader_happens_before_overwrite_without_join_synchronization"
+      ]
+    },
+    {
+      "id": "mosaic-redundant-search-pass",
+      "kind": "mutation",
+      "checks": [
+        "bounded-search-paths"
+      ]
+    },
+    {
+      "id": "shrinker-substituted-defect",
+      "kind": "mutation",
+      "checks": [
+        "defect-identity"
+      ]
+    },
+    {
+      "id": "berry-batch-handoff-unwind",
+      "kind": "mutation",
+      "checks": [
+        "berry-batch-boundaries"
+      ]
+    },
+    {
+      "id": "berry-generation-begin-missing",
+      "kind": "mutation",
+      "checks": [
+        "berry-generation-chain"
+      ]
+    },
+    {
+      "id": "berry-generation-relaxed-publication",
+      "kind": "mutation",
+      "checks": [
+        "berry-generation-chain"
+      ]
+    },
+    {
+      "id": "berry-generation-relaxed-publication-acquire-load",
+      "kind": "mutation",
+      "checks": [
+        "berry-generation-chain"
+      ]
+    },
+    {
+      "id": "berry-generation-missing-final-acquire",
+      "kind": "mutation",
+      "checks": [
+        "berry-generation-chain"
+      ]
+    },
+    {
+      "id": "berry-generation-relaxed-final-load-acquire-load",
+      "kind": "mutation",
+      "checks": [
+        "berry-generation-chain"
+      ]
+    },
+    {
+      "id": "mosaic-batch-handoff-unwind",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-batch-boundaries"
+      ]
+    },
+    {
+      "id": "mosaic-generation-begin-missing",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-generation-chain"
+      ]
+    },
+    {
+      "id": "mosaic-generation-relaxed-publication",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-generation-chain"
+      ]
+    },
+    {
+      "id": "mosaic-generation-relaxed-publication-acquire-load",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-generation-chain"
+      ]
+    },
+    {
+      "id": "mosaic-generation-missing-final-acquire",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-generation-chain"
+      ]
+    },
+    {
+      "id": "mosaic-generation-relaxed-final-load-acquire-load",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-generation-chain"
+      ]
+    },
+    {
+      "id": "berry-drain-without-allocation-gate",
+      "kind": "mutation",
+      "checks": [
+        "berry-closed-drain"
+      ]
+    },
+    {
+      "id": "mosaic-root-skip-last-domain",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-root-all-ledgers"
+      ],
+      "command": "python3 scripts/check-rights-mutations.py --only mosaic-root-skip-last-domain --discard-builds --output <new-directory>"
+    },
+    {
+      "id": "mosaic-lost-free-node-count",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-logical-grant-sets"
+      ],
+      "command": "python3 scripts/check-rights-mutations.py --only mosaic-lost-free-node-count --discard-builds --output <new-directory>"
+    },
+    {
+      "id": "mosaic-lost-free-row",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-logical-grant-sets"
+      ],
+      "command": "python3 scripts/check-rights-mutations.py --only mosaic-lost-free-row --discard-builds --output <new-directory>"
+    },
+    {
+      "id": "mosaic-premature-grant-recycle",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-logical-grant-sets"
+      ],
+      "command": "python3 scripts/check-rights-mutations.py --only mosaic-premature-grant-recycle --discard-builds --output <new-directory>"
+    },
+    {
+      "id": "branch-lost-final-family-right",
+      "kind": "mutation",
+      "checks": [
+        "branches-lifetime"
+      ],
+      "command": "python3 scripts/check-rights-mutations.py --only branch-lost-final-family-right --discard-builds --output <new-directory>"
+    }
+  ],
+  "review_cases": [
+    {
+      "id": "ABPS-001",
+      "title": "Single-slot conservation",
+      "priority": "P0",
+      "checks": [
+        "berry-all-class-faults",
+        "mosaic-all-class-faults",
+        "berry-fault-close-reopen",
+        "mosaic-fault-close-reopen"
+      ],
+      "negative_controls": [
+        "berry-lost-publication",
+        "mosaic-lost-publication"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "One eligible slot, guarded failure and subsequent reuse.",
+      "oracle": "Rollback restores this attempt; the next owner is exclusive.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-002",
+      "title": "All admission fault stages",
+      "priority": "P0",
+      "checks": [
+        "berry-all-class-faults",
+        "mosaic-all-class-faults",
+        "berry-fault-close-reopen",
+        "mosaic-fault-close-reopen"
+      ],
+      "negative_controls": [
+        "berry-lost-root-claim",
+        "berry-lost-refund",
+        "mosaic-lost-refund"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Every guarded stage, both policies, both classes, live neighbors.",
+      "oracle": "Charge, claims, reservation, free bits and neighbor payload remain unchanged.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-003",
+      "title": "Budget exact boundary",
+      "priority": "P0",
+      "checks": [
+        "berry-failure-idempotence",
+        "mosaic-failure-idempotence",
+        "permutations-budget"
+      ],
+      "negative_controls": [
+        "oracle-invalid-rights",
+        "berry-lost-refund",
+        "mosaic-lost-refund"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "More physical slots than admitted capacity.",
+      "oracle": "Exact sequential BudgetExceeded; dropping releases capacity and charge.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-004",
+      "title": "Overflow rejection",
+      "priority": "P1",
+      "checks": [
+        "berry-layout",
+        "mosaic-layout",
+        "branches-layout",
+        "adversarial-pressure"
+      ],
+      "negative_controls": [
+        "oracle-invalid-rights",
+        "berry-stale-initialization",
+        "mosaic-stale-initialization"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Checked layout sizes, reference limits and extreme range endpoints.",
+      "oracle": "Specified errors preserve state; no arithmetic wrapping.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-005",
+      "title": "Failure idempotence",
+      "priority": "P1",
+      "checks": [
+        "berry-failure-idempotence",
+        "mosaic-failure-idempotence"
+      ],
+      "negative_controls": [
+        "berry-lost-root-claim",
+        "berry-lost-refund",
+        "mosaic-lost-refund"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "1000 native error/success cycles; eight per Miri execution.",
+      "oracle": "No accumulated lifetime claims or charges.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-006",
+      "title": "Slot reinitialization",
+      "priority": "P0",
+      "checks": [
+        "berry-all-class-faults",
+        "mosaic-all-class-faults",
+        "boundary-error-histories"
+      ],
+      "negative_controls": [
+        "berry-stale-initialization",
+        "mosaic-stale-initialization"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Reissue after 0xA5 payload with another live neighboring slot.",
+      "oracle": "Fresh filled/initialized lengths, origin and readable initialized prefix.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-007",
+      "title": "Clone/drop conservation",
+      "priority": "P0",
+      "checks": [
+        "permutations-budget",
+        "berry-checked_clone_races_with_nonfinal_release",
+        "mosaic-checked_clone_races_with_nonfinal_release",
+        "berry-generation-clone",
+        "mosaic-generation-clone"
+      ],
+      "negative_controls": [
+        "berry-lost-reference-release",
+        "mosaic-lost-reference-release"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Four owned handles; all 24 drop orders and live-source concurrent clones.",
+      "oracle": "Reclaim only after the final right.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-008",
+      "title": "Batch rollback prefixes",
+      "priority": "P0",
+      "checks": [
+        "berry-si10_batch_rollback_races_with_release_without_returning_original",
+        "mosaic-si10_batch_rollback_races_with_release_without_returning_original",
+        "branches-construction",
+        "berry-batch-boundaries",
+        "berry-generation-chain",
+        "mosaic-batch-boundaries",
+        "mosaic-generation-chain"
+      ],
+      "negative_controls": [
+        "berry-lost-reference-release",
+        "mosaic-lost-reference-release",
+        "batch-lost-guard-rights",
+        "berry-lost-batch-reservation",
+        "mosaic-lost-batch-reservation",
+        "berry-batch-handoff-unwind",
+        "mosaic-batch-handoff-unwind"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Batch N=1..3, every k=0..N, concurrent non-source release.",
+      "oracle": "Live plus unmaterialized rights remain represented; source survives rollback.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-009",
+      "title": "Reference limits",
+      "priority": "P0",
+      "checks": [
+        "berry-reference-boundary",
+        "mosaic-reference-boundary"
+      ],
+      "negative_controls": [
+        "berry-lost-reference-release",
+        "mosaic-lost-reference-release"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Limits 1,2,3; full batch then scalar/empty-view attempt.",
+      "oracle": "Failed creation changes neither refcount nor destinations.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-010",
+      "title": "Remote final drop",
+      "priority": "P0",
+      "checks": [
+        "berry-destroy",
+        "mosaic-destroy",
+        "stress",
+        "berry-fault-close-reopen",
+        "mosaic-fault-close-reopen",
+        "berry-generation-chain",
+        "mosaic-generation-chain"
+      ],
+      "negative_controls": [
+        "berry-relaxed-publication",
+        "mosaic-relaxed-publication"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Remote ownership and last return, including no-join teardown.",
+      "oracle": "No early reuse, lost publication or premature root destruction.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-011",
+      "title": "Nested slices",
+      "priority": "P0",
+      "checks": [
+        "adversarial-pressure",
+        "adversarial-generated"
+      ],
+      "negative_controls": [
+        "oracle-invalid-rights"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Nested, empty and invalid views under live parent/child ownership.",
+      "oracle": "Exact expected byte ranges and unchanged allocation charge.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-012",
+      "title": "Borrowed lifetime",
+      "priority": "P1",
+      "checks": [
+        "borrow-lifetime"
+      ],
+      "negative_controls": [
+        "borrow-escape-rejected"
+      ],
+      "backends": {
+        "berry": "not-applicable: Mosaic borrowed-view, segmented-storage, branch or preparation capability; no new Berry API",
+        "mosaic": "applicable"
+      },
+      "precondition": "Borrowed Mosaic view escaping its owning Buf.",
+      "oracle": "Compiler rejects independent lifetime; borrowed views mint no rights.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-013",
+      "title": "Close with outstanding ownership",
+      "priority": "P0",
+      "checks": [
+        "adversarial-pressure",
+        "berry-return-reincarnation",
+        "mosaic-return-reincarnation",
+        "boundary-error-histories",
+        "berry-retirement-pending",
+        "mosaic-retirement-pending",
+        "berry-closed-drain"
+      ],
+      "negative_controls": [
+        "berry-lost-refund",
+        "mosaic-lost-refund",
+        "berry-drain-without-allocation-gate"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Close before final buffer return; maintenance explicitly delayed.",
+      "oracle": "Closed admissions fail; recycle follows completion, never publication alone.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-014",
+      "title": "Generation reuse",
+      "priority": "P0",
+      "checks": [
+        "berry-return-reincarnation",
+        "mosaic-return-reincarnation",
+        "branches-io-origin",
+        "berry-fault-close-reopen",
+        "mosaic-fault-close-reopen",
+        "berry-generation-chain",
+        "mosaic-generation-chain",
+        "berry-closed-drain"
+      ],
+      "negative_controls": [
+        "berry-repeated-generation",
+        "mosaic-repeated-generation",
+        "berry-generation-begin-missing",
+        "mosaic-generation-begin-missing"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "One record reused repeatedly after complete drain.",
+      "oracle": "Every incarnation has a distinct identity; old returns keep old accounting.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-015",
+      "title": "Root destruction barrier",
+      "priority": "P0",
+      "checks": [
+        "berry-destroy",
+        "mosaic-destroy",
+        "branches-destroy-before-join"
+      ],
+      "negative_controls": [
+        "berry-lost-root-claim",
+        "mosaic-lost-refund"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Controls removed with remote owned buffers or branch families.",
+      "oracle": "Owner-side destruction requires all applicable lifetime rights ended.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-016",
+      "title": "Pending FIFO",
+      "priority": "P0",
+      "checks": [
+        "berry-maintenance",
+        "mosaic-maintenance",
+        "adversarial-pressure"
+      ],
+      "negative_controls": [
+        "oracle-invalid-rights"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Closing records, busy head, poll budgets 0/1/2 and explicit pauses.",
+      "oracle": "Each pending record appears once; examined never exceeds caller budget.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-017",
+      "title": "Generation retirement",
+      "priority": "P1",
+      "checks": [
+        "berry-generation",
+        "mosaic-generation",
+        "berry-retirement-pending",
+        "mosaic-retirement-pending"
+      ],
+      "negative_controls": [
+        "berry-repeated-generation",
+        "mosaic-repeated-generation"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Next generation reaches u64::MAX.",
+      "oracle": "Exhausted identity retires rather than wrapping or reopening.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-018",
+      "title": "Abandoned root",
+      "priority": "P0",
+      "checks": [
+        "berry-abandonment",
+        "mosaic-abandonment"
+      ],
+      "negative_controls": [
+        "berry-lost-root-claim",
+        "mosaic-lost-refund"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Owner disappears before outstanding access; intentional-retention test only.",
+      "oracle": "No early free, observable abandonment, no promised later teardown.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-019",
+      "title": "Disjoint grants",
+      "priority": "P0",
+      "checks": [
+        "berry-partition",
+        "mosaic-partition",
+        "berry-partition-detector",
+        "berry-positive-hint"
+      ],
+      "negative_controls": [
+        "berry-duplicate-grant",
+        "mosaic-duplicate-grant"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Simultaneous reserved domains, shared class words.",
+      "oracle": "Pairwise mask intersections are empty; unassigned plus grants equals valid mask.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-020",
+      "title": "Grant reassignment barrier",
+      "priority": "P0",
+      "checks": [
+        "berry-partition",
+        "mosaic-node-capacity",
+        "reservations",
+        "boundary-error-histories"
+      ],
+      "negative_controls": [
+        "berry-lost-refund",
+        "mosaic-lost-refund"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Close after publication but before refund.",
+      "oracle": "Rights stay assigned through pending return and issuer recycle.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-021",
+      "title": "Transactional grants",
+      "priority": "P0",
+      "checks": [
+        "reservations",
+        "mosaic-partition",
+        "berry-partition"
+      ],
+      "negative_controls": [
+        "berry-duplicate-grant",
+        "mosaic-duplicate-grant"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Multi-class request with unavailable/invalid component.",
+      "oracle": "Neither earlier class grants nor a domain record are partially consumed.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-022",
+      "title": "Grant partition histories",
+      "priority": "P1",
+      "checks": [
+        "adversarial-generated",
+        "berry-partition",
+        "mosaic-partition"
+      ],
+      "negative_controls": [
+        "partition-corrupt-sample",
+        "berry-duplicate-grant",
+        "mosaic-duplicate-grant"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Generated open/close/poll and alternating fragmented allocations.",
+      "oracle": "No duplication or loss of bits, nodes or rows.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-023",
+      "title": "Safety without fairness",
+      "priority": "P1",
+      "checks": [
+        "adversarial-generated",
+        "berry-failure-idempotence",
+        "mosaic-failure-idempotence",
+        "berry-depletion-witness"
+      ],
+      "negative_controls": [
+        "oracle-invalid-rights"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Hot domains repeatedly acquire shared unreserved classes.",
+      "oracle": "Budget/isolation hold; fairness and eventual success are not asserted.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-024",
+      "title": "Word boundaries",
+      "priority": "P0",
+      "checks": [
+        "word-boundaries",
+        "differential",
+        "bounded-search-paths",
+        "boundary-error-histories"
+      ],
+      "negative_controls": [
+        "mosaic-lost-publication",
+        "mosaic-redundant-search-pass"
+      ],
+      "backends": {
+        "berry": "not-applicable: Mosaic borrowed-view, segmented-storage, branch or preparation capability; no new Berry API",
+        "mosaic": "applicable"
+      },
+      "precondition": "W-1/W/W+1 and 2W-1/2W/2W+1 slots, where W=usize::BITS.",
+      "oracle": "Every valid slot reachable; padding bits never issued.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-025",
+      "title": "Depleted witness",
+      "priority": "P0",
+      "checks": [
+        "mosaic-depleted",
+        "mosaic-depleted-witness"
+      ],
+      "negative_controls": [
+        "mosaic-lost-publication",
+        "mosaic-relaxed-publication"
+      ],
+      "backends": {
+        "berry": "not-applicable: Mosaic borrowed-view, segmented-storage, branch or preparation capability; no new Berry API",
+        "mosaic": "applicable"
+      },
+      "precondition": "Publication before and after the first confirming RMW, each start/word.",
+      "oracle": "Strict SI-12 witness, with legal publication after the witness explicitly allowed.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-026",
+      "title": "Mask-node lifecycle",
+      "priority": "P0",
+      "checks": [
+        "mosaic-node-capacity",
+        "mosaic-partition"
+      ],
+      "negative_controls": [
+        "partition-corrupt-sample",
+        "mosaic-duplicate-grant"
+      ],
+      "backends": {
+        "berry": "not-applicable: Mosaic borrowed-view, segmented-storage, branch or preparation capability; no new Berry API",
+        "mosaic": "applicable"
+      },
+      "precondition": "One reserved bit per domain reaches node/row bound; repeat release/reassign.",
+      "oracle": "All nodes/rows partitioned exactly once; bounded walker detects cycles.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-027",
+      "title": "Branch local/global rights",
+      "priority": "P0",
+      "checks": [
+        "branches-lifetime",
+        "branches-construction",
+        "branch-traces"
+      ],
+      "negative_controls": [
+        "branch-missing-local-increment",
+        "batch-lost-guard-rights"
+      ],
+      "backends": {
+        "berry": "not-applicable: Mosaic borrowed-view, segmented-storage, branch or preparation capability; no new Berry API",
+        "mosaic": "applicable"
+      },
+      "precondition": "Independent local families, clones, migration and partial construction.",
+      "oracle": "Local families retain exactly their global rights until final local release.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-028",
+      "title": "Queue credits",
+      "priority": "P0",
+      "checks": [
+        "adapter-credits",
+        "adapter-stale-generation",
+        "scripted-writer"
+      ],
+      "negative_controls": [
+        "adapter-lost-queue-credit"
+      ],
+      "backends": {
+        "berry": "not-applicable: Mosaic borrowed-view, segmented-storage, branch or preparation capability; no new Berry API",
+        "mosaic": "applicable"
+      },
+      "precondition": "Q=1/2/8, fanout=1/2/20; cancel ingress/mailbox/local/dequeued/batch.",
+      "oracle": "Free plus ingress/mailbox/local credits equals Q; batch ownership is separate.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-029",
+      "title": "Branch record reuse",
+      "priority": "P1",
+      "checks": [
+        "branches-io-origin",
+        "branches-stress"
+      ],
+      "negative_controls": [
+        "mosaic-repeated-generation",
+        "branch-missing-local-increment"
+      ],
+      "backends": {
+        "berry": "not-applicable: Mosaic borrowed-view, segmented-storage, branch or preparation capability; no new Berry API",
+        "mosaic": "applicable"
+      },
+      "precondition": "One slot across different payloads and domain incarnations.",
+      "oracle": "Old family cannot access a new incarnation; origin and bytes remain current.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-030",
+      "title": "Branch transfer types",
+      "priority": "P1",
+      "checks": [
+        "traits",
+        "branch-type-contract"
+      ],
+      "negative_controls": [
+        "local-transfer-rejected"
+      ],
+      "backends": {
+        "berry": "not-applicable: Mosaic borrowed-view, segmented-storage, branch or preparation capability; no new Berry API",
+        "mosaic": "applicable"
+      },
+      "precondition": "Branch transferable; local families stay on one worker.",
+      "oracle": "Compile-time Send/Sync/Clone boundaries and compile-fail examples.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-031",
+      "title": "Preparation equivalence",
+      "priority": "P1",
+      "checks": [
+        "preparation-equivalence"
+      ],
+      "negative_controls": [
+        "mosaic-stale-initialization"
+      ],
+      "backends": {
+        "berry": "not-applicable: Mosaic borrowed-view, segmented-storage, branch or preparation capability; no new Berry API",
+        "mosaic": "applicable"
+      },
+      "precondition": "Mosaic Lazy/ZeroPayload with identical subsequent writes and slot reuse.",
+      "oracle": "Safe visible prefixes and outcomes match; cold preparation grants no initialized bytes.",
+      "status": "registered-not-execution-evidence"
+    },
+    {
+      "id": "ABPS-032",
+      "title": "Backend differential histories",
+      "priority": "P1",
+      "checks": [
+        "adversarial-generated",
+        "adversarial-pressure",
+        "metamorphic",
+        "differential",
+        "boundary-error-histories",
+        "defect-identity"
+      ],
+      "negative_controls": [
+        "oracle-invalid-rights",
+        "berry-lost-refund",
+        "mosaic-lost-refund",
+        "shrinker-substituted-defect"
+      ],
+      "backends": {
+        "berry": "applicable",
+        "mosaic": "applicable"
+      },
+      "precondition": "Equivalent configurations; issuer histories preserve explicit maintenance.",
+      "oracle": "Berry/Mosaic results match; reference comparisons use only common semantics.",
+      "status": "registered-not-execution-evidence"
+    }
+  ],
+  "empty_targets": [
+    {
+      "features": "",
+      "target": [
+        "--test",
+        "issuer_traits"
+      ],
+      "reason": "crate-level feature gate"
+    },
+    {
+      "features": "",
+      "target": [
+        "--test",
+        "issuer_snapshots"
+      ],
+      "reason": "crate-level feature gate"
+    },
+    {
+      "features": "",
+      "target": [
+        "--test",
+        "issuer_stress"
+      ],
+      "reason": "crate-level feature gate"
+    },
+    {
+      "features": "",
+      "target": [
+        "--test",
+        "local_branches"
+      ],
+      "reason": "crate-level feature gate"
+    },
+    {
+      "features": "berry-spike",
+      "target": [
+        "--test",
+        "local_branches"
+      ],
+      "reason": "local-branches-spike required"
+    },
+    {
+      "features": "bytes-interop",
+      "target": [
+        "--test",
+        "local_branches"
+      ],
+      "reason": "local-branches-spike required"
+    },
+    {
+      "features": "mosaic-spike",
+      "target": [
+        "--test",
+        "local_branches"
+      ],
+      "reason": "local-branches-spike required"
+    },
+    {
+      "features": "mosaic-spike,bytes-interop",
+      "target": [
+        "--test",
+        "local_branches"
+      ],
+      "reason": "local-branches-spike required"
+    },
+    {
+      "features": "",
+      "target": [
+        "--example",
+        "tcp_fanout"
+      ],
+      "reason": "runnable integration example; tests live in the tcp integration target"
+    },
+    {
+      "features": "berry-spike",
+      "target": [
+        "--example",
+        "tcp_fanout"
+      ],
+      "reason": "runnable integration example; tests live in the tcp integration target"
+    },
+    {
+      "features": "bytes-interop",
+      "target": [
+        "--example",
+        "tcp_fanout"
+      ],
+      "reason": "runnable integration example; tests live in the tcp integration target"
+    },
+    {
+      "features": "mosaic-spike",
+      "target": [
+        "--example",
+        "tcp_fanout"
+      ],
+      "reason": "runnable integration example; tests live in the tcp integration target"
+    },
+    {
+      "features": "mosaic-spike,bytes-interop",
+      "target": [
+        "--example",
+        "tcp_fanout"
+      ],
+      "reason": "runnable integration example; tests live in the tcp integration target"
+    },
+    {
+      "features": "local-branches-spike",
+      "target": [
+        "--example",
+        "tcp_fanout"
+      ],
+      "reason": "runnable integration example; tests live in the tcp integration target"
+    },
+    {
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "tcp_fanout"
+      ],
+      "reason": "runnable integration example; tests live in the tcp integration target"
+    },
+    {
+      "features": "",
+      "target": [
+        "--test",
+        "configuration"
+      ],
+      "reason": "source feature gate requires an issuer backend"
+    }
+  ],
+  "verification_directions": [
+    {
+      "id": "accounting-lifecycle",
+      "checks": [
+        "berry-fault-close-reopen",
+        "mosaic-fault-close-reopen",
+        "boundary-error-histories"
+      ]
+    },
+    {
+      "id": "partial-io-cancellation",
+      "checks": [
+        "scripted-ingress",
+        "scripted-writer"
+      ]
+    },
+    {
+      "id": "bounded-work",
+      "checks": [
+        "bounded-search-paths"
+      ]
+    },
+    {
+      "id": "counterexample-identity",
+      "checks": [
+        "defect-identity"
+      ]
+    },
+    {
+      "id": "generation-transitions",
+      "checks": [
+        "berry-batch-boundaries",
+        "berry-retirement-pending",
+        "berry-generation-chain",
+        "berry-generation-clone",
+        "mosaic-batch-boundaries",
+        "mosaic-retirement-pending",
+        "mosaic-generation-chain",
+        "mosaic-generation-clone",
+        "berry-positive-hint",
+        "berry-depletion-witness",
+        "berry-closed-drain"
+      ]
+    },
+    {
+      "id": "grants-drain-layout",
+      "checks": [
+        "berry-logical-grant-sets",
+        "berry-layout-ranges",
+        "mosaic-logical-grant-sets",
+        "mosaic-layout-ranges",
+        "configuration-boundaries",
+        "mosaic-preflight",
+        "mosaic-root-all-ledgers",
+        "mosaic-masked-cursors",
+        "branch-incarnations"
+      ]
+    }
+  ],
+  "infrastructure_tests": [
+    "EvidenceRegressions"
+  ]
+}

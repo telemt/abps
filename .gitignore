@@ -1,0 +1,8 @@
+/target/
+/fuzz/target/
+/fuzz/artifacts/
+/fuzz/corpus/
+/verification/artifacts/
+/mutants.out/
+/mutants.out.old/
+*.pyc

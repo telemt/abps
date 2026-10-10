@@ -1,0 +1,64 @@
+[package]
+name = "abps-reference"
+version = "0.0.0"
+description = "ABPS Reference: resource and lifecycle example"
+resolver = "3"
+edition = "2024"
+rust-version = "1.96"
+publish = false
+
+[features]
+default = []
+berry-spike = []
+mosaic-spike = []
+local-branches-spike = ["mosaic-spike"]
+bytes-interop = ["berry-spike", "dep:bytes"]
+# Instruments the protocol in library unit tests only; normal builds still use std.
+loom-model = ["berry-spike"]
+
+[dependencies]
+bytes = { version = "1.12", optional = true }
+
+[dev-dependencies]
+criterion = { version = "=0.8.2", default-features = false, features = ["cargo_bench_support"] }
+bytes = "1.12"
+hdrhistogram = { version = "7.5", default-features = false }
+loom = "0.7"
+proptest = "1.9"
+serde_json = "1.0"
+stats_alloc = "0.1.10"
+socket2 = "0.6"
+tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "test-util"] }
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false
+
+[[example]]
+name = "spike_probe"
+required-features = ["berry-spike"]
+
+[[example]]
+name = "spike_alloc"
+required-features = ["berry-spike"]
+
+[[example]]
+name = "mosaic_probe"
+required-features = ["mosaic-spike"]
+
+[[example]]
+name = "branches_probe"
+required-features = ["local-branches-spike"]
+
+[[example]]
+name = "branches_alloc"
+required-features = ["local-branches-spike"]
+
+[[bench]]
+name = "allocator_contracts"
+harness = false
+required-features = ["berry-spike", "mosaic-spike"]
