@@ -615,3 +615,60 @@ fn closed_two_allocation_drain_gates_record_reuse_before_join() {
         "record reuse was not explored"
     );
 }
+
+#[test]
+fn life02_last_claim_observation_acquires_every_prior_return_before_destroy() {
+    // LIFE-02/AP-03: try_destroy's only authorization is the production
+    // Claims::drained observation. Each return releases its root claim last;
+    // Relaxed markers stand for its earlier arena accesses. Separate domain
+    // ledgers cannot supply the edge, and neither can join. Host-only coverage
+    // is written after the assertions and read only after exploration.
+    use std::sync::atomic::{AtomicBool as Coverage, Ordering as Host};
+    struct Root {
+        claims: Claims,
+        class: Bitmap,
+        domains: [DomainLedger; 2],
+        accessed: [AtomicUsize; 2],
+    }
+    let reached = std::sync::Arc::new(Coverage::new(false));
+    let coverage = reached.clone();
+    exhaustive(move || {
+        let root = Arc::new(Root {
+            claims: Claims::new(),
+            class: Bitmap::new(2),
+            domains: std::array::from_fn(|_| DomainLedger::new()),
+            accessed: std::array::from_fn(|_| AtomicUsize::new(0)),
+        });
+        for i in 0..2 {
+            root.claims.pin(1, 8).unwrap();
+            root.domains[i].reserve(4, 4).unwrap();
+            assert_eq!(root.class.take(), Ok(1 << i));
+            root.domains[i].commit();
+        }
+        assert!(!root.claims.drained(), "allocation claims pin the root");
+        let workers: Vec<_> = (0..2)
+            .map(|i| {
+                let root = root.clone();
+                thread::spawn(move || {
+                    root.accessed[i].store(1, Ordering::Relaxed);
+                    Return::new(&root.claims, &root.class, &root.domains[i], 1 << i, 4)
+                        .publish()
+                        .finish();
+                })
+            })
+            .collect();
+        if root.claims.drained() {
+            for flag in &root.accessed {
+                assert_eq!(flag.load(Ordering::Relaxed), 1, "teardown races a returner");
+            }
+            coverage.store(true, Host::Relaxed);
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert!(root.claims.drained());
+        assert!(root.domains.iter().all(DomainLedger::drained));
+        assert_eq!(root.class.load(), 3);
+    });
+    assert!(reached.load(Host::Relaxed), "no pre-join teardown explored");
+}

@@ -12,6 +12,10 @@ use std::sync::atomic::fence;
 #[cfg(not(all(test, feature = "loom-model")))]
 pub(super) use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+/// Transparent: `&Claims` covers exactly the atomic word, so releasing the last
+/// claim through it leaves no protected non-atomic bytes for the owner's
+/// teardown to free (LIFE-02, OWN-03; see PublishedReturn).
+#[repr(transparent)]
 pub(super) struct Claims(pub AtomicUsize);
 impl Claims {
     pub fn new() -> Self {
@@ -28,6 +32,17 @@ impl Claims {
     }
     pub fn load(&self) -> usize {
         self.0.load(Ordering::Acquire)
+    }
+    /// LIFE-02/AP-03: called only by the closed sole owner. Every return
+    /// releases its root claim last, so observing only the owner's claim with
+    /// Acquire acquires all of their arena accesses before teardown.
+    pub fn drained(&self) -> bool {
+        Self::only_owner(self.load())
+    }
+    /// The drain predicate applied to one Acquire `load`. Owner Drop decides
+    /// teardown and reports abandoned claims from that same observation.
+    pub fn only_owner(observed: usize) -> bool {
+        observed == 1
     }
     /// Must be the final access protected by this claim. Never deallocates.
     pub fn release(&self) {
@@ -241,9 +256,14 @@ pub(super) struct Return<'a> {
     bit: usize,
     charge: usize,
 }
+/// SI-01/LIFE-02: after publication only atomic words are borrowed. Releasing
+/// the root claim lets the owner free the arena while `finish` is still live;
+/// a borrowed record with non-atomic bytes (for example padding added for
+/// cache alignment) would stay protected until `finish` returns.
 pub(super) struct PublishedReturn<'a> {
     root: &'a Claims,
-    domain: &'a DomainLedger,
+    admitted: &'a AtomicUsize,
+    allocations: &'a AtomicUsize,
     charge: usize,
 }
 impl<'a> Return<'a> {
@@ -266,15 +286,16 @@ impl<'a> Return<'a> {
         self.class.publish(self.bit);
         PublishedReturn {
             root: self.root,
-            domain: self.domain,
+            admitted: &self.domain.admitted,
+            allocations: &self.domain.allocations,
             charge: self.charge,
         }
     }
 }
 impl PublishedReturn<'_> {
     pub fn finish(self) {
-        self.domain.refund(self.charge);
-        self.domain.allocations.fetch_sub(1, Ordering::Release);
+        self.admitted.fetch_sub(self.charge, Ordering::Release);
+        self.allocations.fetch_sub(1, Ordering::Release);
         self.root.release();
         // No root, domain, or slot access after releasing the lifetime claim.
     }

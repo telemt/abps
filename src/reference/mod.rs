@@ -29,6 +29,7 @@ use std::fmt;
 use std::io::IoSlice;
 use std::marker::PhantomData;
 use std::ops::Range;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError, Weak};
 
 mod state;
@@ -42,7 +43,7 @@ use state::{Admission, Class, DomainRecord, Root, Slot, State};
 ///
 /// | Error | Caller action |
 /// | --- | --- |
-/// | `Contended` | An explicit bounded retry may succeed; not proof of exhaustion. |
+/// | `Contended` | A bounded attempt lost a race, even to a remote refund far below a limit; a bounded retry may succeed. Not proof of exhaustion. |
 /// | `BudgetExceeded` | This attempt observed insufficient byte headroom; the caller owns retry policy. |
 /// | `ClassDepleted`, `DomainClassDepleted` | This attempt observed no eligible slot; a concurrent return can make a later attempt succeed. |
 /// | `DomainMaintenanceRequired` | Issuer calls bounded `poll_domains`; no implicit scan. |
@@ -94,6 +95,45 @@ impl fmt::Display for Error {
     }
 }
 impl std::error::Error for Error {}
+
+/// LIFE-02: opaque process-local root identity for diagnostics, never an
+/// address. Each value is assigned once across all backends. When the space
+/// is exhausted, later roots report 0 (unassigned) instead of reusing one.
+/// Cold preparation work only; only concurrent preparations contend.
+pub(crate) fn next_root_identity() -> usize {
+    static NEXT: AtomicUsize = AtomicUsize::new(1);
+    let mut current = NEXT.load(Ordering::Relaxed);
+    while let Some(next) = current.checked_add(1) {
+        match NEXT.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return current,
+            Err(actual) => current = actual,
+        }
+    }
+    0
+}
+
+/// IO-01: whether one platform descriptor can cover `len` bytes. Windows
+/// `IoSlice` stores a 32-bit length and std panics above it. Other targets
+/// accept any slice; there a comparison against `usize::MAX` would be the
+/// deny-by-default `clippy::absurd_extreme_comparisons`, so no limit is spelled.
+#[cfg(windows)]
+fn io_slice_fits(len: usize) -> bool {
+    u32::try_from(len).is_ok()
+}
+#[cfg(not(windows))]
+fn io_slice_fits(_len: usize) -> bool {
+    true
+}
+
+/// IO-01: borrowed descriptor of `bytes`, or `TooLarge` where one platform
+/// `IoSlice` cannot describe them. Callers split larger views explicitly.
+pub(crate) fn try_io_slice(bytes: &[u8]) -> Result<IoSlice<'_>, Error> {
+    if io_slice_fits(bytes.len()) {
+        Ok(IoSlice::new(bytes))
+    } else {
+        Err(Error::TooLarge)
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct ClassConfig {
@@ -303,6 +343,7 @@ impl StorageOwner {
             root: Some(Arc::new(Root {
                 config,
                 reservation,
+                identity: next_root_identity(),
                 diagnostics,
                 state: Mutex::new(State {
                     phase: RootPhase::Prepared,
@@ -380,8 +421,7 @@ impl Drop for StorageOwner {
                     let mut state = lock(&root.state);
                     state.phase = RootPhase::Abandoned;
                     let event = Abandonment {
-                        // A diagnostic identity only, never a dereferenceable API pointer.
-                        root_identity: Arc::as_ptr(&root) as usize,
+                        root_identity: root.identity,
                         reservation: root.reservation,
                         outstanding_root_claims: Arc::strong_count(&root) - 1,
                         admitted_bytes: state.domains.iter().map(DomainRecord::admitted).sum(),
@@ -442,8 +482,8 @@ impl Pool {
         if state.phase != RootPhase::Active {
             return Err(Error::Closed);
         }
-        self.root.check_handles(2)?;
-        // SI-05: preflight all classes before consuming a record or any grant.
+        // SI-05/SI-09: preflight grants, then the record, then root claims, in
+        // the issuer backends' order, before consuming a record or any grant.
         for grant in grants {
             let class = self
                 .root
@@ -461,10 +501,11 @@ impl Pool {
                 return Err(Error::ReservationUnavailable);
             }
         }
-        let index = state
-            .free_domains
-            .pop()
-            .ok_or(Error::DomainCapacityExhausted)?;
+        if state.free_domains.is_empty() {
+            return Err(Error::DomainCapacityExhausted);
+        }
+        self.root.check_handles(2)?;
+        let index = state.free_domains.pop().expect("checked free record");
         let record = &mut state.domains[index];
         // Recycle retires u64::MAX, so this increment cannot wrap.
         record.generation = record
@@ -809,8 +850,19 @@ impl Buf {
     pub fn backing_capacity(&self) -> usize {
         self.allocation.bytes().len()
     }
+    /// Borrowed descriptor of this view's bytes.
+    ///
+    /// # Panics
+    ///
+    /// On Windows when the view exceeds `u32::MAX` bytes, as `IoSlice::new`
+    /// does. [`Buf::try_as_io_slice`] reports `TooLarge` instead.
     pub fn as_io_slice(&self) -> IoSlice<'_> {
         IoSlice::new(self.as_ref())
+    }
+    /// IO-01: `TooLarge` when one platform descriptor cannot cover this view;
+    /// split it with `try_slice`. No copy, allocation or ownership change.
+    pub fn try_as_io_slice(&self) -> Result<IoSlice<'_>, Error> {
+        try_io_slice(self.as_ref())
     }
 
     pub fn try_clone(&self) -> Result<Self, Error> {

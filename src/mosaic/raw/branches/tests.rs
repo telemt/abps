@@ -201,6 +201,7 @@ fn br05_borrowed_io_views_keep_origin_and_filled_bounds_through_reuse() {
         assert_eq!(branch.len(), 4);
         assert!(!branch.is_empty());
         assert_eq!(branch.as_io_slice().as_ref(), &[value; 4]);
+        assert_eq!(branch.try_as_io_slice().unwrap().as_ref(), &[value; 4]);
         assert_eq!(branch.try_view(1..3).unwrap().as_ref(), &[value; 2]);
         assert_eq!(branch.try_view(0..5).err(), Some(Error::InvalidRange));
         assert_eq!(pool.snapshot().slots[0].references, 1);
@@ -210,7 +211,9 @@ fn br05_borrowed_io_views_keep_origin_and_filled_bounds_through_reuse() {
         assert_eq!(empty.origin(), identity);
         assert_eq!(empty.backing_capacity(), 16);
         assert!(empty.as_io_slice().is_empty());
+        assert!(empty.try_as_io_slice().unwrap().is_empty());
         assert_eq!(local.as_io_slice().as_ref(), &[value; 4]);
+        assert_eq!(local.try_as_io_slice().unwrap().as_ref(), &[value; 4]);
         assert_eq!(local.try_view(0..16).err(), Some(Error::InvalidRange));
         drop(local);
         assert_eq!(domain.metrics().admitted_bytes, 16);
@@ -423,6 +426,51 @@ fn br03_remote_families_allow_teardown_before_worker_join() {
     for t in threads {
         t.join().unwrap();
     }
+}
+
+#[test]
+fn br03_final_family_release_races_teardown_across_many_schedules() {
+    // BR-03/BR-05, SI-11: the last family release ends with the shared final
+    // refund. As in the ordinary Buf regression, one Miri seed must race many
+    // remote releases against owner teardown; the channel orders only handoff.
+    // One slot and one record keep the owner's close/drain pass short, so a
+    // preempted final refund is observed before the returner resumes. With the
+    // padded-ledger control, the shared fixture and 128 races exposed it on 4 of
+    // 16 seeds; this root and 256 races on 15.
+    let rounds = 256;
+    let mut lean = config();
+    lean.classes[0].slots = 1;
+    lean.domain_slots = 1;
+    let (tx, rx) = std::sync::mpsc::channel::<Branch>();
+    let returner = std::thread::spawn(move || {
+        for branch in rx {
+            let local = branch.into_local();
+            let view = local.try_slice(1..3).unwrap();
+            drop(local);
+            assert_eq!(view.as_ref(), b"bc");
+        }
+    });
+    for _ in 0..rounds {
+        let mut o = StorageOwner::prepare(&lean).unwrap();
+        let p = o.activate().unwrap();
+        let (a, d) = p.try_open_domain(16).unwrap();
+        let mut out = [None, None];
+        filled(&d).freeze_branches_into(&mut out).unwrap();
+        drop((d, a, p));
+        for branch in out {
+            tx.send(branch.unwrap()).unwrap();
+        }
+        loop {
+            match o.try_destroy() {
+                Ok(()) => break,
+                Err(Error::Busy) if cfg!(miri) => {}
+                Err(Error::Busy) => std::thread::yield_now(),
+                result => panic!("unexpected destroy: {result:?}"),
+            }
+        }
+    }
+    drop(tx);
+    returner.join().unwrap();
 }
 
 #[test]

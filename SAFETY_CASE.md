@@ -85,8 +85,9 @@ The remote call graph is Lease::{slot,capacity,origin,data,try_clone,begin_retur
 BufMut payload/freeze operations, Buf view/scalar/batch creation and Lease Drop.
 Branch construction uses the checked sidecar projection; FamilyRight finishes
 record access before reconstructing one Lease. Final return captures bitmap,
-ledger, bit and capacity before publication; PublishedReturn has no slot access
-and its final refund is the last arena access. No remote operation uses RootPtr.
+ledger, bit and capacity before publication; PublishedReturn has no slot access,
+borrows only the admitted word, and its final refund is the last arena access.
+No remote operation uses RootPtr.
 Compiler checks first build this boundary successfully, then require eight precise
 access/privacy rejections. Raw paused-return integration checks metadata and
 diagnostics at refs=0, after publication, after cross-domain reuse and after old
@@ -103,6 +104,28 @@ grants remain pinned through pending returns. Owner drop before drain deliberate
 abandons the arena; subsequent drops never acquire teardown work. mem::forget can
 retain resources forever. Existing no-join teardown and reuse-before-refund tests
 check the boundary without crediting thread join as the synchronization proof.
+
+The last access is also a Rust borrow obligation (OWN-03). The owner may free the
+arena while the returner's frame is still live, and a protected reference to
+non-atomic bytes would outlive that deallocation. Mosaic's 64-byte-aligned ledger
+has 56 padding bytes: refunding through `&DomainLedger` was UB in both Stacked and
+Tree Borrows. Each PublishedReturn therefore holds only `&AtomicUsize` words, and
+Berry's `Claims` is `repr(transparent)`, so neither correctness depends on layout.
+Miri sees the window only when a schedule preempts the returner inside it (about
+1% of races), so three regressions run hundreds of races per seed with a
+persistent returner: ordinary Buf, branch families and Berry claims. In a local
+Miri sample (nightly, Windows x86_64) the ordinary Buf regression exposed the
+old refund on all 16 seeds; the adversarial review found it with the earlier
+single-race teardown tests on none of 64 seeds. Per-seed detection is weaker for
+the shorter Berry claim window and for the branch root's longer drain pass, and
+an unrelated source edit moves every seed's schedule: after one such edit 128
+Berry races caught the padded control on 7 of 16 seeds, and 128 branch races
+on the shared two-record fixture on 4. Berry now runs 512 races (15 of 16), and
+the branch regression races a one-slot, one-record root 256 times (15 of 16).
+Negative controls restore the padded-ledger borrow in either backend; each passes
+its baseline under seeds 1..=3 and counts as killed when one seed exposes it, so
+the verdict does not hinge on one schedule. Berry's root-claim edge has its own
+production-protocol Loom model; it kills Relaxed release and load of the claim.
 
 ### diagnostics
 
@@ -153,8 +176,8 @@ This is a private protocol hardening, not a reproduced public unwind defect.
 | Reference decrement Release + final Acquire fence (TSan: Acquire load) | Every earlier reader finishes before reuse. The final load precedes bitmap publication and cannot see a new allocation. | Both actual variants in no-join reader/overwrite and branch-reuse Loom; missing-fence and Relaxed-load mutations; Miri/native reuse. |
 | Bitmap publication Release, claim Acquire | Publication ends all old slot access; only issuer clears bits. | Two-return conservation, masked grants, return/reuse tests. |
 | Confirming Acquire RMW | Read modification-order predecessor; Mosaic's confirming pass has an empty witness under monotone remote publication. | Berry stale-hint and Mosaic hidden-publication regressions; depletion negative control. |
-| Berry domain/root completion Release, drain Acquire | No premature domain reuse or root destroy; root release is last. | Identity/drain Loom and owner teardown without join. |
-| Mosaic refund Release, drain Acquire | Positive charge pins storage until the final access; all ledgers must drain. | Multi-domain zero-observation Loom and raw no-join teardown. |
+| Berry domain/root completion Release, drain Acquire | No premature domain reuse or root destroy; root release is last and borrows only the claim word. | Identity/drain Loom, last-claim teardown Loom with Relaxed release/load controls, owner teardown without join, schedule-dense Miri teardown. |
+| Mosaic refund Release, drain Acquire | Positive charge pins storage until the final access, which borrows only the admitted word; all ledgers must drain. | Multi-domain zero-observation Loom, raw no-join teardown, schedule-dense Miri teardown for Buf and branch families with a padded-ledger control. |
 | Frozen Release / diagnostics Acquire | Diagnostic observation only; payload transfer still requires synchronized ownership handoff. | Remote-freeze snapshot and mutable-handoff tests. |
 | Exclusive references begin / branch begin, Relaxed | No published right exists during initialization. | Admission faults, branch construction and rollback. |
 | Diagnostic reference release/acquire and status publication | Observers retain their own record; status does not authorize arena access. | Diagnostics after destroy/abandonment and Miri. |
@@ -220,6 +243,8 @@ is distinct from a completed campaign; results retain the source and tool bounds
 | SI-10: source, constructed handles and pending rights conserve references | `abps_batch_boundaries_conserve_handles_pending_and_source`; injected handoff-unwind mutation | Exact observations occur at complete, nonconcurrent boundaries. |
 | OWN-03: batch/scalar readers precede a reinitialized slot | `generations::batch_release_chain_reinitializes_one_slot_without_join`, `live_clone_source_survives_peer_release_and_next_generation`; missing begin/final acquire and Relaxed publication controls | Finite protocol compositions; raw arena access is covered separately. |
 | LIFE-01/02: closed-domain completion gates reuse and retirement | `closed_two_allocation_drain_gates_record_reuse_before_join`, `abps_generation_retirement_waits_for_closed_domain_returns`; omitted allocation-gate control | Requires the single sequential issuer and no outstanding admission commit. |
+| LIFE-02, OWN-03: the final refund/claim release borrows only atomic words before owner teardown | `si11_final_refund_races_teardown_across_many_schedules`, `br03_final_family_release_races_teardown_across_many_schedules`, `life02_final_claim_release_races_teardown_across_many_schedules`; padded-ledger controls | Miri samples schedules per seed: detection is probabilistic per seed, deterministic per seed and source. |
+| LIFE-02, AP-03: Berry's teardown observation acquires every earlier return | `life02_last_claim_observation_acquires_every_prior_return_before_destroy`; Relaxed claim release/load controls | Protocol model without raw storage. |
 | MEM-02, LIFE-02, SI-05: rollback followed by close/remote return/reopen preserves the neighbor and pinned grants | `abps_fault_close_remote_return_reopen_preserves_neighbor` in both raw backends; existing admission/refund/generation controls | The experiments do not help stopped returns. |
 | OWN-01, MEM-02, LIFE-02: boundary histories retain exact error outcomes, payload and generation isolation | `abps_boundary_histories_preserve_errors_isolation_and_recycling`, independent rights oracle | Exact ledger comparisons occur in sequential/quiescent states. |
 | SI-12, AP-08: first-pass success and empty-mask confirmation stay within the search bound | `abps_search_success_and_masked_failure_have_bounded_work`; redundant-pass mutation | Counts protocol visits, not machine instructions or elapsed latency. |
@@ -294,7 +319,10 @@ the same `root_drained` predicate. Three records include a charged final record;
 two returns address the same or different domains. Relaxed reader markers must be
 visible before join if drain succeeds. Host-only coverage flags ensure the success
 branch was explored without supplying model synchronization. Berry retains its
-separate claim/allocation proof and existing paused-return/no-join tests.
+separate claim/allocation proof and existing paused-return/no-join tests. Its
+raw `try_destroy`, owner Drop and last-claim Loom model share one predicate,
+`Claims::only_owner`, applied to a single Acquire load; Drop also reports
+abandoned claims from that same observation.
 
 BR-03/04: review includes the complete [storage implementation](src/mosaic/raw/branches.rs),
 [local protocol](src/mosaic/protocol/branches.rs), [Loom compositions](src/mosaic/protocol/tests/local_branches.rs)

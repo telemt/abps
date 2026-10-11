@@ -282,6 +282,8 @@ fn mutable_handoff_freeze_and_first_remote_final_return() {
     .join()
     .unwrap();
     assert_eq!(frame.as_ref(), b"mutable remote");
+    assert_eq!(frame.as_io_slice().as_ref(), b"mutable remote");
+    assert_eq!(frame.try_as_io_slice().unwrap().as_ref(), b"mutable remote");
     std::thread::spawn(move || drop(frame)).join().unwrap();
     finish(owner, pool, authority, domain);
 }
@@ -304,6 +306,35 @@ fn cold_teardown_observes_final_return_without_thread_join() {
     }
     assert!(diagnostics.snapshot().destroyed);
     worker.join().unwrap();
+}
+
+#[test]
+fn life02_final_claim_release_races_teardown_across_many_schedules() {
+    // LIFE-02/AP-03: each return releases its root claim last; the owner may
+    // free the arena right after acquiring claims == 1. Miri sees a protected
+    // borrow across that release only when a schedule preempts the returner
+    // there, so one seed runs many races (see the Mosaic final-refund test).
+    // The window after the claim release spans only a few basic blocks: with
+    // the padded-ledger control, 128 races exposed it on 7 of 16 seeds, 512 on 15.
+    let rounds = 512;
+    let (tx, rx) = std::sync::mpsc::channel::<Buf>();
+    let returner = std::thread::spawn(move || rx.into_iter().for_each(drop));
+    for _ in 0..rounds {
+        let (mut owner, pool, authority, domain) = fixture(1, 1);
+        let frame = domain.try_acquire(1).unwrap().freeze();
+        drop((domain, authority, pool));
+        tx.send(frame).unwrap();
+        loop {
+            match owner.try_destroy() {
+                Ok(()) => break,
+                Err(Error::Busy) if cfg!(miri) => {}
+                Err(Error::Busy) => std::thread::yield_now(),
+                result => panic!("unexpected destroy: {result:?}"),
+            }
+        }
+    }
+    drop(tx);
+    returner.join().unwrap();
 }
 
 #[test]
@@ -513,6 +544,24 @@ fn generation_exhaustion_retires_record() {
     assert_eq!(pool.snapshot().retired_domain_records, 1);
     drop(pool);
     owner.try_destroy().unwrap();
+}
+
+#[test]
+fn life02_root_identity_is_opaque_and_survives_storage_reuse() {
+    // LIFE-02: diagnostics outlive their owner, so a destroyed root's identity
+    // must not reappear when the allocator reuses its arena for a new root.
+    let first = StorageOwner::prepare(&config(1, 1)).unwrap();
+    let observer = first.diagnostics().unwrap();
+    let address = first.root.unwrap().0.as_ptr().addr();
+    drop(first);
+    let second = StorageOwner::prepare(&config(1, 1)).unwrap();
+    let (old, new) = (
+        observer.snapshot(),
+        second.diagnostics().unwrap().snapshot(),
+    );
+    assert!(old.destroyed);
+    assert!(old.root_identity != 0 && new.root_identity > old.root_identity);
+    assert_ne!(old.root_identity, address, "no heap address is exported");
 }
 
 #[test]

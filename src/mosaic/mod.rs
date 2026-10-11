@@ -23,7 +23,16 @@ pub struct LocalBranchConfig {
     pub local_reference_limit: usize,
 }
 
+/// Build with `Config::new`, then assign fields. Non-exhaustive: the
+/// feature-gated `local_branches` field must not break builds when Cargo
+/// unifies the `local-branches-spike` feature for another crate in the graph.
+///
+/// ```compile_fail,E0639
+/// let config = abps_reference::mosaic::Config::new(Vec::new(), 1, 1);
+/// let _ = abps_reference::mosaic::Config { domain_slots: 2, ..config };
+/// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Config {
     pub classes: Vec<ClassConfig>,
     pub domain_slots: usize,

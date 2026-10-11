@@ -23,6 +23,24 @@ class VerificationTests(unittest.TestCase):
         self.assertFalse(a.rejected(101,log.replace('raw.rs','unrelated.rs'),'E0599','`pin`'))
         self.assertFalse(a.rejected(101,'could not compile','E0599','`pin`'))
         self.assertFalse(a.rejected(101,json.dumps(row),'E0599','`pin`'))
+    def test_remote_authority_accepts_windows_separators_only_for_the_probe_file(self):
+        import json
+        import check_remote_authority as a
+        end=json.dumps({"reason":"build-finished","success":False})
+        def log(*spans):
+            message={"level":"error","code":{"code":"E0599"},"message":"no method named `pin`",
+                     "spans":[{"file_name":name,"is_primary":primary} for name,primary in spans]}
+            return json.dumps({"reason":"compiler-message","message":message})+'\n'+end
+        # Spans as rustc reports them on x86_64-pc-windows-msvc.
+        windows=log(('src\\mosaic\\raw.rs',True),('src\\mosaic\\raw\\remote.rs',False))
+        self.assertTrue(a.rejected(101,windows,'E0599','`pin`'))
+        self.assertTrue(a.rejected(101,log(('src/mosaic\\raw.rs',True)),'E0599','`pin`'))
+        for spans in [(('src\\mosaic\\raw.rs',False),('src\\mosaic\\raw\\remote.rs',True)),
+                      (('src\\mosaic\\raw\\remote.rs',True),),(('other\\src\\mosaic\\raw.rs',True),),
+                      (('src\\mosaic\\raw.rs.orig',True),)]:
+            self.assertFalse(a.rejected(101,log(*spans),'E0599','`pin`'),spans)
+        self.assertFalse(a.rejected(0,windows,'E0599','`pin`'))
+        self.assertFalse(a.rejected(101,windows,'E0616','private'))
     def test_loom_keeps_bounds_without_interleaving_result_lines(self):
         import argparse
         r=object.__new__(v.Runner);r.args=argparse.Namespace(profile='smoke')
@@ -85,6 +103,16 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual(m.classify(101,failed,'target',True),'timeout')
         self.assertEqual(m.classify(0,'test result: ok. 1 passed;','target'),'surviving-requires-review')
         self.assertEqual(m.classify(-6,'SIGABRT','target'),'incomplete')
+    def test_miri_undefined_behavior_kills_only_inside_the_named_test(self):
+        spec=importlib.util.spec_from_file_location('mutation_support',Path(__file__).with_name('mutation_support.py'))
+        m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+        ub='running 1 test\ntest target ... error: Undefined Behavior: deallocating while item is strongly protected'
+        self.assertEqual(m.classify(101,ub,'target'),'killed')
+        self.assertEqual(m.classify(101,ub,'different'),'incomplete')
+        self.assertEqual(m.classify(0,ub,'target'),'incomplete')
+        self.assertEqual(m.classify(101,'could not compile\n'+ub,'target'),'build-failure')
+        self.assertEqual(m.classify(101,ub,'target',True),'timeout')
+        self.assertEqual(m.classify(101,'test target ... error: unsupported operation','target'),'incomplete')
     def test_adapter_and_adversarial_targets_cannot_be_omitted_from_sanitizers(self):
         self.assertIn((["--example","spike_probe"],"spike_support::network::worker_fanout::tests::"),v.SANITIZER_GROUPS)
         self.assertIn((["--test","adversarial"],""),v.SANITIZER_GROUPS)
@@ -184,6 +212,68 @@ class VerificationTests(unittest.TestCase):
             with self.assertRaises(v.VerificationError):
                 r.run('timeout',[sys.executable,'-c','import time;time.sleep(60)'])
             self.assertEqual(json.loads((r.out/'results.json').read_text())['status'],'incomplete')
+    def test_timeout_kill_reaches_descendants(self):
+        import subprocess,sys,time
+        # The grandchild inherits the pipe, so EOF requires every holder to have exited.
+        code=("import subprocess,sys,time;"
+              "subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],stdout=sys.stdout);"
+              "print('ready',flush=True);time.sleep(60)")
+        p=subprocess.Popen([sys.executable,'-c',code],stdout=subprocess.PIPE,start_new_session=True)
+        with p.stdout:
+            self.assertEqual(p.stdout.readline().strip(),b'ready')
+            v.kill_process_tree(p);p.wait()
+            started=time.monotonic();p.stdout.read()
+            self.assertLess(time.monotonic()-started,30,'a descendant outlived the timeout kill')
+    def test_directed_timeout_stops_the_run_and_is_never_a_kill(self):
+        import sys
+        import mutation_support as m
+        child='import time;print("test target ... FAILED\\ntest result: FAILED. 0 passed; 1 failed;",flush=True);time.sleep(60)'
+        with tempfile.TemporaryDirectory() as directory:
+            code,output,timed_out=m.execute([sys.executable,'-c',child],directory,None,Path(directory)/'run.log',timeout=1)
+            self.assertTrue(timed_out)
+            self.assertIn('test target ... FAILED',output)
+            self.assertEqual(m.classify(code,output,'target',timed_out),'timeout')
+    def test_directed_variants_need_every_baseline_and_one_detecting_schedule(self):
+        import os,sys
+        import mutation_support as m
+        # A schedule-dependent detector: after mutation only FAILING seeds fail;
+        # BROKEN seeds fail even unmodified.
+        child=("import os,pathlib,sys;s=os.environ['SEED'];"
+               "bad=s in os.environ['BROKEN'] or ('new' in pathlib.Path('f.txt').read_text() "
+               "and s in os.environ['FAILING']);"
+               "print('test target ... '+('FAILED' if bad else 'ok'));"
+               "print('test result: '+('FAILED. 0 passed; 1 failed;' if bad else 'ok. 1 passed;'));"
+               "sys.exit(101 if bad else 0)")
+        def case(failing,broken='',variants=[{'SEED':s} for s in '123']):
+            directory=tempfile.mkdtemp();self.addCleanup(__import__('shutil').rmtree,directory)
+            source=Path(directory)/'source';source.mkdir();(source/'f.txt').write_text('old')
+            env=dict(os.environ,FAILING=failing,BROKEN=broken,SEED='')
+            r=m.run_case('case',source,'f.txt',[('old','new')],[sys.executable,'-c',child],'target',env,variants)
+            return r,sorted(p.name for p in Path(directory).glob('*.log')),(source/'f.txt').read_text()
+        r,logs,text=case('2')
+        self.assertEqual((r['status'],r['caught'],r['baseline_passed'],r['decided_by']),('killed',True,True,1))
+        self.assertEqual(logs,['baseline-0.log','baseline-1.log','baseline-2.log','run-0.log','run-1.log'])
+        r,logs,text=case('')
+        self.assertEqual((r['status'],r['caught'],r['decided_by']),('surviving-requires-review',False,2))
+        # A failing baseline under any variant is incomplete and mutates nothing.
+        r,logs,text=case('123',broken='3')
+        self.assertEqual((r['status'],r['caught'],r['baseline_passed'],text),('baseline-incomplete',False,False,'old'))
+        self.assertEqual(logs,['baseline-0.log','baseline-1.log','baseline-2.log'])
+        r,logs,text=case('1',variants=[{'SEED':'1'}])
+        self.assertEqual((r['status'],logs),('killed',['baseline.log','run.log']))
+        self.assertNotIn('variants',r)
+    def test_directed_targets_are_short_distinct_and_exclusive(self):
+        import mutation_support as m
+        spec=importlib.util.spec_from_file_location('rights_mutations',Path(__file__).with_name('check-rights-mutations.py'))
+        rights=importlib.util.module_from_spec(spec);spec.loader.exec_module(rights)
+        names=[case[0] for case in rights.cases()]
+        with tempfile.TemporaryDirectory() as directory:
+            output=Path(directory).resolve()
+            targets=[m.create_case_target(output,name) for name in names]
+            self.assertEqual(len(set(targets)),len(names))
+            for target in targets:
+                self.assertEqual((target.parent,len(str(target))),(output/'target',len(str(output))+20))
+            with self.assertRaises(FileExistsError):m.create_case_target(output,names[0])
     def test_missing_executable_records_unsupported(self):
         import argparse,json
         with tempfile.TemporaryDirectory() as directory:
@@ -305,6 +395,19 @@ class EvidenceRegressions(unittest.TestCase):
             with patch.object(r,'run',side_effect=v.VerificationError('timeout')):
                 with self.assertRaises(v.VerificationError):r.directed_mutation('control',scratch)
             self.assertEqual((r.out/'control/run.log').read_text(),'interrupted detector')
+
+    def test_directed_evidence_keeps_case_logs_without_case_targets(self):
+        import mutation_support as m
+        with tempfile.TemporaryDirectory() as directory:
+            r=object.__new__(v.Runner);r.out=Path(directory)/'out';r.out.mkdir()
+            scratch=Path(directory)/'scratch';(scratch/'case').mkdir(parents=True)
+            (scratch/'case/run.log').write_text('detector')
+            (m.create_case_target(scratch,'case')/'artifact').write_text('build')
+            with patch.object(r,'run',side_effect=v.VerificationError('timeout')):
+                with self.assertRaises(v.VerificationError):r.directed_mutation('control',scratch)
+            self.assertEqual((r.out/'control/case/run.log').read_text(),'detector')
+            copied=[p.relative_to(r.out).as_posix() for p in r.out.rglob('*') if p.is_file()]
+            self.assertEqual(copied,['control/case/run.log'])
 
     def test_report_and_failed_summary_override_success(self):
         for report in ['SUMMARY: AddressSanitizer: heap-use-after-free',

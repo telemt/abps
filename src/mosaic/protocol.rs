@@ -45,15 +45,21 @@ impl DomainLedger {
             .map_err(|_| Error::Contended)
     }
     pub fn refund(&self, charge: usize) {
-        let old = self.admitted.fetch_sub(charge, Ordering::Release);
-        // SI-11: use only the returned scalar after the final storage access.
-        debug_assert!(old >= charge, "refund must own its full charge");
+        refund_admitted(&self.admitted, charge);
     }
     pub fn drained(&self) -> bool {
         // Completion is published after the refund, and no issuer admission
         // overlaps this issuer-only drain decision for a closed domain.
         self.admitted.load(Ordering::Acquire) == 0
     }
+}
+
+/// SI-11: Release subtraction of a charge owned by the caller. A final refund
+/// is the last storage access, so it borrows only the atomic word and uses
+/// only the returned scalar afterwards (see PublishedReturn).
+fn refund_admitted(admitted: &AtomicUsize, charge: usize) {
+    let old = admitted.fetch_sub(charge, Ordering::Release);
+    debug_assert!(old >= charge, "refund must own its full charge");
 }
 
 pub(super) struct Bitmap(pub AtomicUsize);
@@ -220,8 +226,13 @@ pub(super) struct Return<'a> {
     bit: usize,
     charge: usize,
 }
+/// SI-11/AP-02: after publication only the atomic admitted word is borrowed.
+/// The final refund lets the owner observe zero and free the arena while this
+/// frame is still live. A borrow covering non-atomic bytes, such as the padding
+/// of the 64-byte-aligned DomainLedger, would stay protected until `finish`
+/// returns and that deallocation would be UB (cf. rust-lang/rust#55005).
 pub(super) struct PublishedReturn<'a> {
-    domain: &'a DomainLedger,
+    admitted: &'a AtomicUsize,
     charge: usize,
 }
 impl<'a> Return<'a> {
@@ -236,14 +247,14 @@ impl<'a> Return<'a> {
     pub fn publish(self) -> PublishedReturn<'a> {
         self.class.publish(self.bit);
         PublishedReturn {
-            domain: self.domain,
+            admitted: &self.domain.admitted,
             charge: self.charge,
         }
     }
 }
 impl PublishedReturn<'_> {
     pub fn finish(self) {
-        self.domain.refund(self.charge);
+        refund_admitted(self.admitted, self.charge);
 
         // SI-11: no storage access after this final refund.
     }

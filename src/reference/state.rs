@@ -18,6 +18,8 @@ pub enum DomainPhase {
 }
 
 /// Opaque accounting identity. Diagnostic formatting is not a wire representation.
+/// Scoped to its root (SI-07): domains of different roots can compare equal, so
+/// collectors key by root identity and DomainIdentity together.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DomainIdentity {
     pub(super) index: usize,
@@ -40,8 +42,11 @@ pub struct ClassSnapshot {
     pub reserved: usize,
     /// Unassigned rights in Reserved mode; all slots in Unreserved mode.
     pub unassigned: usize,
+    /// PROG-01 transitional credit. The reference changes it only inside one
+    /// mutex critical section, so every snapshot observes zero.
     pub acquiring: usize,
     pub issued: usize,
+    /// PROG-01 transitional credit; zero in every snapshot, as `acquiring`.
     pub returning: usize,
 }
 
@@ -89,6 +94,8 @@ pub struct Snapshot {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Abandonment {
+    /// Opaque process-local identity, never an address or reused value
+    /// (0 only once the identity space is exhausted).
     pub root_identity: usize,
     pub reservation: Reservation,
     pub outstanding_root_claims: usize,
@@ -125,6 +132,8 @@ impl Diagnostics {
 pub(super) struct Root {
     pub config: Config,
     pub reservation: Reservation,
+    /// LIFE-02 diagnostic identity, assigned at preparation (not an address).
+    pub identity: usize,
     pub diagnostics: Diagnostics,
     pub state: Mutex<State>,
 }
@@ -399,14 +408,11 @@ impl<'a> Admission<'a> {
                 .ok_or(Error::DomainClassDepleted)?;
             class.free.swap_remove(position)
         } else {
-            class
-                .free
-                .pop()
-                .ok_or(if class.acquiring == 0 && class.returning == 0 {
-                    Error::ClassDepleted
-                } else {
-                    Error::Contended
-                })?
+            // PROG-02: exact depletion needs zero available, acquiring and
+            // returning credits. The mutex confines the transitional credits
+            // to one critical section, so this observation is always coherent.
+            debug_assert!(class.acquiring == 0 && class.returning == 0);
+            class.free.pop().ok_or(Error::ClassDepleted)?
         };
         class.acquiring += 1;
         self.credit = Some(slot);

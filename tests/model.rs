@@ -77,6 +77,113 @@ fn mosaic_large_grants_match_reference_across_reuse_and_fragmentation() {
     s.try_destroy().unwrap();
 }
 
+/// SI-09/SI-13: one sequential history with competing open failures yields one
+/// answer: validation, Active gate, grant availability, record, root claims.
+/// Pool clones exhaust root claims, so each backend's claim accounting
+/// (allocations or controls only) cannot select a different outcome.
+macro_rules! open_error_order {
+    ($($api:ident)::+, $limit:ident, $prepare:expr) => {{
+        use $($api)::+::{CapacityPolicy, ClassConfig, ClassReservation, Config, Error, Pool};
+        fn fill(pool: &Pool) -> Vec<Pool> {
+            let mut clones = Vec::new();
+            loop {
+                match pool.try_clone() {
+                    Ok(clone) => clones.push(clone),
+                    Err(e) => {
+                        assert_eq!(e, Error::ReferenceLimit);
+                        return clones;
+                    }
+                }
+            }
+        }
+        let config = |reserved: bool, records: usize| {
+            let classes = vec![ClassConfig { capacity: 16, slots: 1 }];
+            let mut c = Config::new(classes, records, 1 << 20);
+            c.$limit = 8;
+            if reserved {
+                c.capacity_policy = CapacityPolicy::Reserved;
+            }
+            c
+        };
+        let prepare = $prepare;
+        let grant = |slots| [ClassReservation { capacity: 16, slots }];
+        let mut errors = Vec::new();
+        // Each case also exhausts root claims: 0 grant, 1 record, 2 record for
+        // an empty grant, 3 claims only, 4 Closed, 5 unknown class, 6 policy
+        // mismatch, 7 record pinned by a closed domain's buffer.
+        for case in 0..8 {
+            let reserved = !matches!(case, 1 | 6 | 7);
+            let records = if matches!(case, 1 | 2 | 7) { 1 } else { 2 };
+            let mut owner = prepare(config(reserved, records)).unwrap();
+            let pool = owner.activate().unwrap();
+            let mut held = Vec::new();
+            let mut retained = None;
+            match case {
+                1 => held.push(pool.try_open_domain(16).unwrap()),
+                2 => held.push(pool.try_open_reserved_domain(16, &[]).unwrap()),
+                7 => {
+                    // A closed record pinned by its buffer: pending maintenance
+                    // in issuer backends, an unavailable record in the reference.
+                    let (_authority, domain) = pool.try_open_domain(16).unwrap();
+                    retained = Some(domain.try_acquire(1).unwrap());
+                }
+                _ => {}
+            }
+            if matches!(case, 4..=6) {
+                owner.close().unwrap();
+            }
+            let clones = fill(&pool);
+            let unknown = [ClassReservation { capacity: 17, slots: 1 }];
+            errors.push(match case {
+                0 | 4 => pool.try_open_reserved_domain(16, &grant(2)).err(),
+                1 | 7 => pool.try_open_domain(16).err(),
+                2 => pool.try_open_reserved_domain(16, &[]).err(),
+                5 => pool.try_open_reserved_domain(16, &unknown).err(),
+                _ => pool.try_open_reserved_domain(16, &grant(1)).err(),
+            });
+            drop((clones, held, retained, pool));
+            owner.try_destroy().unwrap();
+        }
+        errors
+    }};
+}
+#[test]
+fn si09_open_error_order_matches_reference_in_issuer_backends() {
+    use abps_reference::Error::*;
+    let expected = [
+        ReservationUnavailable,
+        DomainCapacityExhausted,
+        DomainCapacityExhausted,
+        ReferenceLimit,
+        Closed,
+        InvalidConfiguration,
+        InvalidConfiguration,
+    ]
+    .map(Some);
+    let reference = open_error_order!(abps_reference, handle_limit, |c| {
+        abps_reference::StorageOwner::prepare(c)
+    });
+    assert_eq!(reference[..7], expected);
+    // Normalized maintenance difference: the reference has no pending FIFO.
+    assert_eq!(reference[7], Some(DomainCapacityExhausted));
+    #[cfg(feature = "berry-spike")]
+    {
+        let berry = open_error_order!(abps_reference::berry, handle_limit, |c| {
+            abps_reference::berry::StorageOwner::prepare(&c)
+        });
+        assert_eq!(berry[..7], expected, "Berry open error order");
+        assert_eq!(berry[7], Some(DomainMaintenanceRequired));
+    }
+    #[cfg(feature = "mosaic-spike")]
+    {
+        let mosaic = open_error_order!(abps_reference::mosaic, control_handle_limit, |c| {
+            abps_reference::mosaic::StorageOwner::prepare(&c)
+        });
+        assert_eq!(mosaic[..7], expected, "Mosaic open error order");
+        assert_eq!(mosaic[7], Some(DomainMaintenanceRequired));
+    }
+}
+
 fn property_config() -> proptest::test_runner::Config {
     proptest::test_runner::Config {
         cases: if cfg!(miri) {

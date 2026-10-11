@@ -333,7 +333,14 @@ mod histories {
     use super::*;
     fn boundary_counts() -> Vec<usize> {
         let w = usize::BITS as usize;
-        vec![2, w - 1, w, w + 1, 2 * w - 1, 2 * w, 2 * w + 1]
+        if cfg!(miri) {
+            // Every step audits all records: O(slots^2) per history, beyond a
+            // Miri budget from w+1 slots up. Native runs cover every word edge;
+            // Miri covers multi-word grants in the fragmented/sparse tests.
+            vec![2]
+        } else {
+            vec![2, w - 1, w, w + 1, 2 * w - 1, 2 * w, 2 * w + 1]
+        }
     }
     fn read_rights(p: &Pool, d: usize) -> Vec<BTreeSet<usize>> {
         let part = Partition::read(p);

@@ -34,10 +34,11 @@ def rejected(code, output, expected, marker):
             finished.append(row.get("success"))
         if row.get("reason") == "compiler-message" and row["message"]["level"] == "error":
             errors.append(row["message"])
+    # rustc joins span paths with the host separator: src\mosaic\raw.rs on Windows.
     return (code == 101 and finished == [False] and len(errors) == 1
             and (errors[0].get("code") or {}).get("code") == expected
             and marker in errors[0]["message"]
-            and any(s.get("is_primary") and s["file_name"] == "src/mosaic/raw.rs"
+            and any(s.get("is_primary") and s["file_name"].replace("\\", "/") == "src/mosaic/raw.rs"
                     for s in errors[0]["spans"]))
 
 

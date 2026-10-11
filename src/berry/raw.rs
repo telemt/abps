@@ -35,6 +35,9 @@ impl Reservation {
     }
 }
 
+/// Opaque origin identity of one domain incarnation, scoped to its root (SI-07):
+/// domains of different roots can compare equal, so collectors key by root
+/// identity and DomainIdentity together.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DomainIdentity {
     index: usize,
@@ -425,6 +428,8 @@ unsafe impl Sync for Diagnostics {}
 pub struct DiagnosticsSnapshot {
     pub abps_abandoned_roots: usize,
     pub abps_abandoned_bytes: usize,
+    /// Opaque process-local identity, never an address or reused value
+    /// (0 only once the identity space is exhausted).
     pub root_identity: usize,
     pub outstanding_root_claims: usize,
     pub admitted_bytes: usize,
@@ -501,6 +506,8 @@ impl StorageOwner {
             }
             return Err(Error::AllocationFailed);
         };
+        // LIFE-02: an opaque diagnostic identity, never the arena address.
+        let root_identity = crate::reference::next_root_identity();
         let ptr = RootPtr(memory.cast());
         // SAFETY MEM-01/OWN-03: initialize only the typed metadata ranges derived
         // by Layout::extend, before any handle exists. No whole-arena &mut is
@@ -585,7 +592,7 @@ impl StorageOwner {
                 .cast::<DiagnosticRecord>()
                 .write(DiagnosticRecord {
                     references: protocol::References::new(),
-                    root_identity: memory.as_ptr().addr(),
+                    root_identity,
                     reservation: plan.reservation,
                     abandoned: AtomicBool::new(false),
                     destroyed: AtomicBool::new(false),
@@ -635,7 +642,7 @@ impl StorageOwner {
     pub fn try_destroy(&mut self) -> Result<(), Error> {
         let ptr = self.root.ok_or(Error::Destroyed)?;
         ptr.close();
-        if ptr.root().claims.load() != 1 {
+        if !ptr.root().claims.drained() {
             return Err(Error::Busy);
         }
         self.root = None;
@@ -654,7 +661,7 @@ impl Drop for StorageOwner {
         };
         ptr.close();
         let claims = ptr.root().claims.load();
-        if claims == 1 {
+        if protocol::Claims::only_owner(claims) {
             ptr.destroy();
             self.diagnostics
                 .record()
@@ -897,6 +904,9 @@ impl Domain {
         }
         Ok(root.class_count)
     }
+    /// SI-01: one bounded attempt with no retry or wait. A remote refund that
+    /// lands between the admission load and its single CAS yields `Contended`
+    /// even far below the limit; retry policy belongs to the caller.
     pub fn try_acquire(&self, size: usize) -> Result<BufMut, Error> {
         self.acquire(
             size,
@@ -1267,12 +1277,26 @@ impl Buf {
     pub fn backing_capacity(&self) -> usize {
         self.lease.capacity()
     }
+    /// Borrowed descriptor of this view's bytes.
+    ///
+    /// # Panics
+    ///
+    /// On Windows when the view exceeds `u32::MAX` bytes, as `IoSlice::new`
+    /// does. [`Buf::try_as_io_slice`] reports `TooLarge` instead.
     pub fn as_io_slice(&self) -> IoSlice<'_> {
         IoSlice::new(self.as_ref())
+    }
+    /// IO-01: `TooLarge` when one platform descriptor cannot cover this view;
+    /// split it with `try_slice`. No copy, allocation or ownership change.
+    pub fn try_as_io_slice(&self) -> Result<IoSlice<'_>, Error> {
+        crate::reference::try_io_slice(self.as_ref())
     }
     pub fn try_clone(&self) -> Result<Self, Error> {
         self.try_slice(0..self.len())
     }
+    /// One checked CAS on the slot refcount (OWN-02): a concurrent clone or
+    /// release of the same backing can make it `Contended` far below
+    /// `reference_limit`; failure leaves ownership unchanged.
     pub fn try_slice(&self, range: Range<usize>) -> Result<Self, Error> {
         if range.start > range.end || range.end > self.len() {
             return Err(Error::InvalidRange);

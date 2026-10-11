@@ -2063,6 +2063,161 @@
         "tsan"
       ],
       "critical": true
+    },
+    {
+      "id": "mosaic-final-refund-schedules",
+      "invariants": [
+        "SI-11",
+        "AP-02",
+        "LIFE-02",
+        "OWN-03"
+      ],
+      "selector": "mosaic::raw::tests::si11_final_refund_races_teardown_across_many_schedules",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "branches-final-release-schedules",
+      "invariants": [
+        "BR-03",
+        "BR-05",
+        "SI-11",
+        "LIFE-02",
+        "OWN-03"
+      ],
+      "selector": "mosaic::raw::branches::tests::br03_final_family_release_races_teardown_across_many_schedules",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-final-claim-schedules",
+      "invariants": [
+        "SI-01",
+        "AP-03",
+        "LIFE-02",
+        "OWN-03"
+      ],
+      "selector": "berry::raw::tests::life02_final_claim_release_races_teardown_across_many_schedules",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "berry-root-last-claim",
+      "invariants": [
+        "SI-01",
+        "AP-03",
+        "LIFE-02"
+      ],
+      "selector": "berry::protocol::tests::life02_last_claim_observation_acquires_every_prior_return_before_destroy",
+      "features": "local-branches-spike,loom-model",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "loom"
+      ],
+      "critical": true,
+      "reference_acquire": [
+        "fence",
+        "acquire-load"
+      ],
+      "allow_feature_superset": true
+    },
+    {
+      "id": "open-error-order",
+      "invariants": [
+        "SI-05",
+        "SI-09",
+        "SI-13",
+        "LIFE-01"
+      ],
+      "selector": "si09_open_error_order_matches_reference_in_issuer_backends",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "model"
+      ],
+      "tools": [
+        "native",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "root-identity",
+      "invariants": [
+        "LIFE-02"
+      ],
+      "selector": "raw::tests::life02_root_identity_is_opaque_and_survives_storage_reuse",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": false
+    },
+    {
+      "id": "reference-root-identity",
+      "invariants": [
+        "LIFE-02"
+      ],
+      "selector": "reference::tests::life02_root_identity_is_assigned_once_not_an_address",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native"
+      ],
+      "critical": false
+    },
+    {
+      "id": "io-descriptor-limit",
+      "invariants": [
+        "IO-01"
+      ],
+      "selector": "reference::tests::io01_platform_descriptor_limit_is_an_explicit_error",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--lib"
+      ],
+      "tools": [
+        "native"
+      ],
+      "critical": false
     }
   ],
   "intentional_retention": [
@@ -2464,6 +2619,42 @@
         "branches-lifetime"
       ],
       "command": "python3 scripts/check-rights-mutations.py --only branch-lost-final-family-right --discard-builds --output <new-directory>"
+    },
+    {
+      "id": "berry-relaxed-root-claim-release",
+      "kind": "mutation",
+      "checks": [
+        "berry-root-last-claim"
+      ]
+    },
+    {
+      "id": "berry-relaxed-root-claim-load",
+      "kind": "mutation",
+      "checks": [
+        "berry-root-last-claim"
+      ]
+    },
+    {
+      "id": "mosaic-final-refund-padded-ledger",
+      "kind": "mutation",
+      "checks": [
+        "mosaic-final-refund-schedules",
+        "branches-final-release-schedules"
+      ]
+    },
+    {
+      "id": "berry-final-release-padded-ledger",
+      "kind": "mutation",
+      "checks": [
+        "berry-final-claim-schedules"
+      ]
+    },
+    {
+      "id": "reference-open-claims-before-record",
+      "kind": "mutation",
+      "checks": [
+        "open-error-order"
+      ]
     }
   ],
   "review_cases": [
@@ -2683,11 +2874,15 @@
         "berry-fault-close-reopen",
         "mosaic-fault-close-reopen",
         "berry-generation-chain",
-        "mosaic-generation-chain"
+        "mosaic-generation-chain",
+        "mosaic-final-refund-schedules",
+        "berry-final-claim-schedules"
       ],
       "negative_controls": [
         "berry-relaxed-publication",
-        "mosaic-relaxed-publication"
+        "mosaic-relaxed-publication",
+        "mosaic-final-refund-padded-ledger",
+        "berry-final-release-padded-ledger"
       ],
       "backends": {
         "berry": "applicable",
@@ -2795,11 +2990,19 @@
       "checks": [
         "berry-destroy",
         "mosaic-destroy",
-        "branches-destroy-before-join"
+        "branches-destroy-before-join",
+        "berry-root-last-claim",
+        "mosaic-final-refund-schedules",
+        "branches-final-release-schedules",
+        "berry-final-claim-schedules"
       ],
       "negative_controls": [
         "berry-lost-root-claim",
-        "mosaic-lost-refund"
+        "mosaic-lost-refund",
+        "berry-relaxed-root-claim-release",
+        "berry-relaxed-root-claim-load",
+        "mosaic-final-refund-padded-ledger",
+        "berry-final-release-padded-ledger"
       ],
       "backends": {
         "berry": "applicable",
@@ -2857,7 +3060,8 @@
       "priority": "P0",
       "checks": [
         "berry-abandonment",
-        "mosaic-abandonment"
+        "mosaic-abandonment",
+        "root-identity"
       ],
       "negative_controls": [
         "berry-lost-root-claim",
@@ -3149,13 +3353,15 @@
         "metamorphic",
         "differential",
         "boundary-error-histories",
-        "defect-identity"
+        "defect-identity",
+        "open-error-order"
       ],
       "negative_controls": [
         "oracle-invalid-rights",
         "berry-lost-refund",
         "mosaic-lost-refund",
-        "shrinker-substituted-defect"
+        "shrinker-substituted-defect",
+        "reference-open-claims-before-record"
       ],
       "backends": {
         "berry": "applicable",

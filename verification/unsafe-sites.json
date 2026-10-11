@@ -2,7 +2,7 @@
   {
     "id": "src/berry/raw.rs:1",
     "path": "src/berry/raw.rs",
-    "line": 211,
+    "line": 214,
     "symbol": "RootPtr::root",
     "site": "unsafe { self.0.as_ref() }",
     "proof": "layout",
@@ -15,7 +15,7 @@
   {
     "id": "src/berry/raw.rs:2",
     "path": "src/berry/raw.rs",
-    "line": 217,
+    "line": 220,
     "symbol": "RootPtr::class",
     "site": "unsafe {",
     "proof": "layout",
@@ -28,7 +28,7 @@
   {
     "id": "src/berry/raw.rs:3",
     "path": "src/berry/raw.rs",
-    "line": 231,
+    "line": 234,
     "symbol": "RootPtr::domain",
     "site": "unsafe {",
     "proof": "layout",
@@ -41,7 +41,7 @@
   {
     "id": "src/berry/raw.rs:4",
     "path": "src/berry/raw.rs",
-    "line": 245,
+    "line": 248,
     "symbol": "RootPtr::slot",
     "site": "unsafe {",
     "proof": "layout",
@@ -54,7 +54,7 @@
   {
     "id": "src/berry/raw.rs:5",
     "path": "src/berry/raw.rs",
-    "line": 258,
+    "line": 261,
     "symbol": "RootPtr::free_id",
     "site": "unsafe {",
     "proof": "layout",
@@ -67,7 +67,7 @@
   {
     "id": "src/berry/raw.rs:6",
     "path": "src/berry/raw.rs",
-    "line": 274,
+    "line": 277,
     "symbol": "RootPtr::grant",
     "site": "unsafe {",
     "proof": "layout",
@@ -80,7 +80,7 @@
   {
     "id": "src/berry/raw.rs:7",
     "path": "src/berry/raw.rs",
-    "line": 328,
+    "line": 331,
     "symbol": "RootPtr::recycle_domain",
     "site": "unsafe { self.free_id(count).write(index) };",
     "proof": "admission",
@@ -95,7 +95,7 @@
   {
     "id": "src/berry/raw.rs:8",
     "path": "src/berry/raw.rs",
-    "line": 400,
+    "line": 403,
     "symbol": "RootPtr::destroy",
     "site": "unsafe {",
     "proof": "teardown",
@@ -108,7 +108,7 @@
   {
     "id": "src/berry/raw.rs:9",
     "path": "src/berry/raw.rs",
-    "line": 421,
+    "line": 424,
     "symbol": "Send for Diagnostics::destroy",
     "site": "unsafe impl Send for Diagnostics {}",
     "proof": "diagnostics",
@@ -121,7 +121,7 @@
   {
     "id": "src/berry/raw.rs:10",
     "path": "src/berry/raw.rs",
-    "line": 423,
+    "line": 426,
     "symbol": "Sync for Diagnostics::destroy",
     "site": "unsafe impl Sync for Diagnostics {}",
     "proof": "diagnostics",
@@ -134,7 +134,7 @@
   {
     "id": "src/berry/raw.rs:11",
     "path": "src/berry/raw.rs",
-    "line": 436,
+    "line": 441,
     "symbol": "Diagnostics::record",
     "site": "unsafe { self.ptr.as_ref() }",
     "proof": "diagnostics",
@@ -147,7 +147,7 @@
   {
     "id": "src/berry/raw.rs:12",
     "path": "src/berry/raw.rs",
-    "line": 472,
+    "line": 477,
     "symbol": "Drop for Diagnostics::drop",
     "site": "unsafe {",
     "proof": "diagnostics",
@@ -160,7 +160,7 @@
   {
     "id": "src/berry/raw.rs:13",
     "path": "src/berry/raw.rs",
-    "line": 494,
+    "line": 499,
     "symbol": "StorageOwner::prepare",
     "site": "let memory = NonNull::new(unsafe { alloc(plan.layout) }).ok_or(Error::AllocationFailed)?;",
     "proof": "preparation",
@@ -173,7 +173,7 @@
   {
     "id": "src/berry/raw.rs:14",
     "path": "src/berry/raw.rs",
-    "line": 496,
+    "line": 501,
     "symbol": "StorageOwner::prepare",
     "site": "let diagnostic = NonNull::new(unsafe { alloc(Layout::new::<DiagnosticRecord>()) });",
     "proof": "preparation",
@@ -186,7 +186,7 @@
   {
     "id": "src/berry/raw.rs:15",
     "path": "src/berry/raw.rs",
-    "line": 499,
+    "line": 504,
     "symbol": "StorageOwner::prepare",
     "site": "unsafe {",
     "proof": "preparation",
@@ -199,7 +199,7 @@
   {
     "id": "src/berry/raw.rs:16",
     "path": "src/berry/raw.rs",
-    "line": 509,
+    "line": 516,
     "symbol": "StorageOwner::prepare",
     "site": "unsafe {",
     "proof": "preparation",
@@ -207,12 +207,12 @@
       "berry-layout",
       "berry-initialized"
     ],
-    "context_sha256": "c33b51dab91657d7cffec561924dede1bab432d3cea4ce77ba39be4ef1cc4da1"
+    "context_sha256": "6f27805381b2b54cc434a7f9ad5fc0c4e8c1ae342f897b6b360028c02fa16cd7"
   },
   {
     "id": "src/berry/raw.rs:17",
     "path": "src/berry/raw.rs",
-    "line": 745,
+    "line": 752,
     "symbol": "Pool::open_inner",
     "site": "let index = unsafe { self.root.free_id(count - 1).read() };",
     "proof": "admission",
@@ -227,7 +227,7 @@
   {
     "id": "src/berry/raw.rs:18",
     "path": "src/berry/raw.rs",
-    "line": 963,
+    "line": 973,
     "symbol": "Domain::acquire",
     "site": "unsafe {",
     "proof": "admission",
@@ -242,7 +242,7 @@
   {
     "id": "src/berry/raw.rs:19",
     "path": "src/berry/raw.rs",
-    "line": 1056,
+    "line": 1066,
     "symbol": "Send for Lease::drop",
     "site": "unsafe impl Send for Lease {}",
     "proof": "ownership",
@@ -257,7 +257,7 @@
   {
     "id": "src/berry/raw.rs:20",
     "path": "src/berry/raw.rs",
-    "line": 1059,
+    "line": 1069,
     "symbol": "Sync for Lease::drop",
     "site": "unsafe impl Sync for Lease {}",
     "proof": "ownership",
@@ -272,7 +272,7 @@
   {
     "id": "src/berry/raw.rs:21",
     "path": "src/berry/raw.rs",
-    "line": 1071,
+    "line": 1081,
     "symbol": "Lease::origin",
     "site": "unsafe { *self.slot().origin.get() }",
     "proof": "ownership",
@@ -287,7 +287,7 @@
   {
     "id": "src/berry/raw.rs:22",
     "path": "src/berry/raw.rs",
-    "line": 1076,
+    "line": 1086,
     "symbol": "Lease::data",
     "site": "unsafe {",
     "proof": "ownership",
@@ -302,7 +302,7 @@
   {
     "id": "src/berry/raw.rs:23",
     "path": "src/berry/raw.rs",
-    "line": 1140,
+    "line": 1150,
     "symbol": "bytes::BufMut for BufMut::drop",
     "site": "unsafe impl bytes::BufMut for BufMut {",
     "proof": "ownership",
@@ -317,7 +317,7 @@
   {
     "id": "src/berry/raw.rs:24",
     "path": "src/berry/raw.rs",
-    "line": 1148,
+    "line": 1158,
     "symbol": "bytes::BufMut for BufMut::chunk_mut",
     "site": "unsafe {",
     "proof": "ownership",
@@ -332,7 +332,7 @@
   {
     "id": "src/berry/raw.rs:25",
     "path": "src/berry/raw.rs",
-    "line": 1155,
+    "line": 1165,
     "symbol": "bytes::BufMut for BufMut::advance_mut",
     "site": "unsafe fn advance_mut(&mut self, count: usize) {",
     "proof": "ownership",
@@ -347,7 +347,7 @@
   {
     "id": "src/berry/raw.rs:26",
     "path": "src/berry/raw.rs",
-    "line": 1187,
+    "line": 1197,
     "symbol": "BufMut::put_slice",
     "site": "unsafe {",
     "proof": "ownership",
@@ -362,7 +362,7 @@
   {
     "id": "src/berry/raw.rs:27",
     "path": "src/berry/raw.rs",
-    "line": 1205,
+    "line": 1215,
     "symbol": "BufMut::initialize_to",
     "site": "unsafe {",
     "proof": "ownership",
@@ -377,7 +377,7 @@
   {
     "id": "src/berry/raw.rs:28",
     "path": "src/berry/raw.rs",
-    "line": 1216,
+    "line": 1226,
     "symbol": "BufMut::initialize_to",
     "site": "Ok(unsafe { std::slice::from_raw_parts_mut(self.lease.data(), len) })",
     "proof": "ownership",
@@ -392,7 +392,7 @@
   {
     "id": "src/berry/raw.rs:29",
     "path": "src/berry/raw.rs",
-    "line": 1238,
+    "line": 1248,
     "symbol": "AsRef<[u8]> for BufMut::as_ref",
     "site": "unsafe { std::slice::from_raw_parts(self.lease.data(), self.filled) }",
     "proof": "ownership",
@@ -407,7 +407,7 @@
   {
     "id": "src/berry/raw.rs:30",
     "path": "src/berry/raw.rs",
-    "line": 1301,
+    "line": 1325,
     "symbol": "AsRef<[u8]> for Buf::as_ref",
     "site": "unsafe { std::slice::from_raw_parts(self.lease.data().add(self.range.start), self.len()) }",
     "proof": "ownership",
@@ -422,7 +422,7 @@
   {
     "id": "src/berry/raw.rs:31",
     "path": "src/berry/raw.rs",
-    "line": 1563,
+    "line": 1587,
     "symbol": "Default for DomainMetrics::snapshot",
     "site": "let origin = unsafe { *slot.origin.get() };",
     "proof": "observations",
@@ -434,7 +434,7 @@
   {
     "id": "src/mosaic/raw.rs:1",
     "path": "src/mosaic/raw.rs",
-    "line": 308,
+    "line": 311,
     "symbol": "RootPtr::root",
     "site": "unsafe { self.0.as_ref() }",
     "proof": "layout",
@@ -447,7 +447,7 @@
   {
     "id": "src/mosaic/raw.rs:2",
     "path": "src/mosaic/raw.rs",
-    "line": 314,
+    "line": 317,
     "symbol": "RootPtr::class",
     "site": "unsafe {",
     "proof": "layout",
@@ -460,7 +460,7 @@
   {
     "id": "src/mosaic/raw.rs:3",
     "path": "src/mosaic/raw.rs",
-    "line": 328,
+    "line": 331,
     "symbol": "RootPtr::domain",
     "site": "unsafe {",
     "proof": "layout",
@@ -473,7 +473,7 @@
   {
     "id": "src/mosaic/raw.rs:4",
     "path": "src/mosaic/raw.rs",
-    "line": 342,
+    "line": 345,
     "symbol": "RootPtr::slot",
     "site": "unsafe {",
     "proof": "layout",
@@ -486,7 +486,7 @@
   {
     "id": "src/mosaic/raw.rs:5",
     "path": "src/mosaic/raw.rs",
-    "line": 355,
+    "line": 358,
     "symbol": "RootPtr::free_id",
     "site": "unsafe {",
     "proof": "layout",
@@ -499,7 +499,7 @@
   {
     "id": "src/mosaic/raw.rs:6",
     "path": "src/mosaic/raw.rs",
-    "line": 366,
+    "line": 369,
     "symbol": "RootPtr::at",
     "site": "unsafe fn at<T>(&self, offset: usize, index: usize) -> &T {",
     "proof": "layout",
@@ -512,7 +512,7 @@
   {
     "id": "src/mosaic/raw.rs:7",
     "path": "src/mosaic/raw.rs",
-    "line": 369,
+    "line": 372,
     "symbol": "RootPtr::at",
     "site": "unsafe {",
     "proof": "layout",
@@ -525,7 +525,7 @@
   {
     "id": "src/mosaic/raw.rs:8",
     "path": "src/mosaic/raw.rs",
-    "line": 382,
+    "line": 385,
     "symbol": "RootPtr::word",
     "site": "unsafe { self.at(self.root().plan.words, index) }",
     "proof": "layout",
@@ -538,7 +538,7 @@
   {
     "id": "src/mosaic/raw.rs:9",
     "path": "src/mosaic/raw.rs",
-    "line": 390,
+    "line": 393,
     "symbol": "RootPtr::unassigned",
     "site": "unsafe { self.at(self.root().plan.unassigned, index) }",
     "proof": "layout",
@@ -551,7 +551,7 @@
   {
     "id": "src/mosaic/raw.rs:10",
     "path": "src/mosaic/raw.rs",
-    "line": 395,
+    "line": 398,
     "symbol": "RootPtr::cursor",
     "site": "unsafe { self.at(self.root().plan.cursors, index) }",
     "proof": "layout",
@@ -564,7 +564,7 @@
   {
     "id": "src/mosaic/raw.rs:11",
     "path": "src/mosaic/raw.rs",
-    "line": 400,
+    "line": 403,
     "symbol": "RootPtr::entry",
     "site": "unsafe {",
     "proof": "layout",
@@ -577,7 +577,7 @@
   {
     "id": "src/mosaic/raw.rs:12",
     "path": "src/mosaic/raw.rs",
-    "line": 410,
+    "line": 413,
     "symbol": "RootPtr::node",
     "site": "unsafe { self.at(self.root().plan.nodes, index) }",
     "proof": "layout",
@@ -590,7 +590,7 @@
   {
     "id": "src/mosaic/raw.rs:13",
     "path": "src/mosaic/raw.rs",
-    "line": 415,
+    "line": 418,
     "symbol": "RootPtr::row_id",
     "site": "unsafe { self.at(self.root().plan.row_ids, index) }",
     "proof": "layout",
@@ -603,7 +603,7 @@
   {
     "id": "src/mosaic/raw.rs:14",
     "path": "src/mosaic/raw.rs",
-    "line": 626,
+    "line": 629,
     "symbol": "RootPtr::recycle_domain",
     "site": "unsafe { self.free_id(count).write(index) };",
     "proof": "admission",
@@ -618,7 +618,7 @@
   {
     "id": "src/mosaic/raw.rs:15",
     "path": "src/mosaic/raw.rs",
-    "line": 698,
+    "line": 701,
     "symbol": "RootPtr::destroy",
     "site": "unsafe {",
     "proof": "teardown",
@@ -631,7 +631,7 @@
   {
     "id": "src/mosaic/raw.rs:16",
     "path": "src/mosaic/raw.rs",
-    "line": 720,
+    "line": 723,
     "symbol": "Send for Diagnostics::destroy",
     "site": "unsafe impl Send for Diagnostics {}",
     "proof": "diagnostics",
@@ -644,7 +644,7 @@
   {
     "id": "src/mosaic/raw.rs:17",
     "path": "src/mosaic/raw.rs",
-    "line": 722,
+    "line": 725,
     "symbol": "Sync for Diagnostics::destroy",
     "site": "unsafe impl Sync for Diagnostics {}",
     "proof": "diagnostics",
@@ -657,7 +657,7 @@
   {
     "id": "src/mosaic/raw.rs:18",
     "path": "src/mosaic/raw.rs",
-    "line": 736,
+    "line": 741,
     "symbol": "Diagnostics::record",
     "site": "unsafe { self.ptr.as_ref() }",
     "proof": "diagnostics",
@@ -670,7 +670,7 @@
   {
     "id": "src/mosaic/raw.rs:19",
     "path": "src/mosaic/raw.rs",
-    "line": 773,
+    "line": 778,
     "symbol": "Drop for Diagnostics::drop",
     "site": "unsafe {",
     "proof": "diagnostics",
@@ -683,7 +683,7 @@
   {
     "id": "src/mosaic/raw.rs:20",
     "path": "src/mosaic/raw.rs",
-    "line": 782,
+    "line": 787,
     "symbol": "Drop for Diagnostics::prepare_payload",
     "site": "unsafe fn prepare_payload(mut ptr: *mut u8, mut len: usize) {",
     "proof": "preparation",
@@ -696,7 +696,7 @@
   {
     "id": "src/mosaic/raw.rs:21",
     "path": "src/mosaic/raw.rs",
-    "line": 786,
+    "line": 791,
     "symbol": "Drop for Diagnostics::prepare_payload",
     "site": "unsafe {",
     "proof": "preparation",
@@ -709,7 +709,7 @@
   {
     "id": "src/mosaic/raw.rs:22",
     "path": "src/mosaic/raw.rs",
-    "line": 794,
+    "line": 799,
     "symbol": "Drop for Diagnostics::prepare_payload",
     "site": "unsafe {",
     "proof": "preparation",
@@ -722,7 +722,7 @@
   {
     "id": "src/mosaic/raw.rs:23",
     "path": "src/mosaic/raw.rs",
-    "line": 802,
+    "line": 807,
     "symbol": "Drop for Diagnostics::prepare_payload",
     "site": "unsafe {",
     "proof": "preparation",
@@ -735,7 +735,7 @@
   {
     "id": "src/mosaic/raw.rs:24",
     "path": "src/mosaic/raw.rs",
-    "line": 825,
+    "line": 830,
     "symbol": "StorageOwner::prepare",
     "site": "let memory = NonNull::new(unsafe { alloc(plan.layout) }).ok_or(Error::AllocationFailed)?;",
     "proof": "preparation",
@@ -748,7 +748,7 @@
   {
     "id": "src/mosaic/raw.rs:25",
     "path": "src/mosaic/raw.rs",
-    "line": 827,
+    "line": 832,
     "symbol": "StorageOwner::prepare",
     "site": "let diagnostic = NonNull::new(unsafe { alloc(Layout::new::<DiagnosticRecord>()) });",
     "proof": "preparation",
@@ -761,7 +761,7 @@
   {
     "id": "src/mosaic/raw.rs:26",
     "path": "src/mosaic/raw.rs",
-    "line": 830,
+    "line": 835,
     "symbol": "StorageOwner::prepare",
     "site": "unsafe {",
     "proof": "preparation",
@@ -774,7 +774,7 @@
   {
     "id": "src/mosaic/raw.rs:27",
     "path": "src/mosaic/raw.rs",
-    "line": 840,
+    "line": 847,
     "symbol": "StorageOwner::prepare",
     "site": "unsafe {",
     "proof": "preparation",
@@ -782,12 +782,12 @@
       "mosaic-layout",
       "mosaic-initialized"
     ],
-    "context_sha256": "c33b51dab91657d7cffec561924dede1bab432d3cea4ce77ba39be4ef1cc4da1"
+    "context_sha256": "6f27805381b2b54cc434a7f9ad5fc0c4e8c1ae342f897b6b360028c02fa16cd7"
   },
   {
     "id": "src/mosaic/raw.rs:28",
     "path": "src/mosaic/raw.rs",
-    "line": 1010,
+    "line": 1017,
     "symbol": "StorageOwner::prepare",
     "site": "unsafe {",
     "proof": "preparation",
@@ -800,7 +800,7 @@
   {
     "id": "src/mosaic/raw.rs:29",
     "path": "src/mosaic/raw.rs",
-    "line": 1186,
+    "line": 1193,
     "symbol": "Pool::open_inner",
     "site": "let index = unsafe { self.root.free_id(count - 1).read() };",
     "proof": "admission",
@@ -815,7 +815,7 @@
   {
     "id": "src/mosaic/raw.rs:30",
     "path": "src/mosaic/raw.rs",
-    "line": 1404,
+    "line": 1414,
     "symbol": "Domain::acquire",
     "site": "unsafe {",
     "proof": "admission",
@@ -830,7 +830,7 @@
   {
     "id": "src/mosaic/raw.rs:31",
     "path": "src/mosaic/raw.rs",
-    "line": 1497,
+    "line": 1507,
     "symbol": "Send for Lease::drop",
     "site": "unsafe impl Send for Lease {}",
     "proof": "ownership",
@@ -845,7 +845,7 @@
   {
     "id": "src/mosaic/raw.rs:32",
     "path": "src/mosaic/raw.rs",
-    "line": 1500,
+    "line": 1510,
     "symbol": "Sync for Lease::drop",
     "site": "unsafe impl Sync for Lease {}",
     "proof": "ownership",
@@ -860,7 +860,7 @@
   {
     "id": "src/mosaic/raw.rs:33",
     "path": "src/mosaic/raw.rs",
-    "line": 1512,
+    "line": 1522,
     "symbol": "Lease::origin",
     "site": "unsafe { *self.slot().origin.get() }",
     "proof": "ownership",
@@ -875,7 +875,7 @@
   {
     "id": "src/mosaic/raw.rs:34",
     "path": "src/mosaic/raw.rs",
-    "line": 1572,
+    "line": 1582,
     "symbol": "bytes::BufMut for BufMut::drop",
     "site": "unsafe impl bytes::BufMut for BufMut {",
     "proof": "ownership",
@@ -890,7 +890,7 @@
   {
     "id": "src/mosaic/raw.rs:35",
     "path": "src/mosaic/raw.rs",
-    "line": 1580,
+    "line": 1590,
     "symbol": "bytes::BufMut for BufMut::chunk_mut",
     "site": "unsafe {",
     "proof": "ownership",
@@ -905,7 +905,7 @@
   {
     "id": "src/mosaic/raw.rs:36",
     "path": "src/mosaic/raw.rs",
-    "line": 1587,
+    "line": 1597,
     "symbol": "bytes::BufMut for BufMut::advance_mut",
     "site": "unsafe fn advance_mut(&mut self, count: usize) {",
     "proof": "ownership",
@@ -920,7 +920,7 @@
   {
     "id": "src/mosaic/raw.rs:37",
     "path": "src/mosaic/raw.rs",
-    "line": 1619,
+    "line": 1629,
     "symbol": "BufMut::put_slice",
     "site": "unsafe {",
     "proof": "ownership",
@@ -935,7 +935,7 @@
   {
     "id": "src/mosaic/raw.rs:38",
     "path": "src/mosaic/raw.rs",
-    "line": 1637,
+    "line": 1647,
     "symbol": "BufMut::initialize_to",
     "site": "unsafe {",
     "proof": "ownership",
@@ -950,7 +950,7 @@
   {
     "id": "src/mosaic/raw.rs:39",
     "path": "src/mosaic/raw.rs",
-    "line": 1648,
+    "line": 1658,
     "symbol": "BufMut::initialize_to",
     "site": "Ok(unsafe { std::slice::from_raw_parts_mut(self.lease.data(), len) })",
     "proof": "ownership",
@@ -965,7 +965,7 @@
   {
     "id": "src/mosaic/raw.rs:40",
     "path": "src/mosaic/raw.rs",
-    "line": 1670,
+    "line": 1680,
     "symbol": "AsRef<[u8]> for BufMut::as_ref",
     "site": "unsafe { std::slice::from_raw_parts(self.lease.data(), self.filled) }",
     "proof": "ownership",
@@ -980,7 +980,7 @@
   {
     "id": "src/mosaic/raw.rs:41",
     "path": "src/mosaic/raw.rs",
-    "line": 1768,
+    "line": 1803,
     "symbol": "AsRef<[u8]> for Buf::as_ref",
     "site": "unsafe { std::slice::from_raw_parts(self.lease.data().add(self.range.start), self.len()) }",
     "proof": "ownership",
@@ -995,7 +995,7 @@
   {
     "id": "src/mosaic/raw.rs:42",
     "path": "src/mosaic/raw.rs",
-    "line": 2030,
+    "line": 2065,
     "symbol": "Default for DomainMetrics::snapshot",
     "site": "let origin = unsafe { *slot.origin.get() };",
     "proof": "observations",
@@ -1023,7 +1023,7 @@
   {
     "id": "src/mosaic/raw/branches.rs:2",
     "path": "src/mosaic/raw/branches.rs",
-    "line": 141,
+    "line": 152,
     "symbol": "FamilyRight::record",
     "site": "unsafe { self.record.as_ref() }",
     "proof": "families",
@@ -1039,7 +1039,7 @@
   {
     "id": "src/mosaic/raw/branches.rs:3",
     "path": "src/mosaic/raw/branches.rs",
-    "line": 193,
+    "line": 204,
     "symbol": "LocalBuf::origin",
     "site": "unsafe {",
     "proof": "families",
@@ -1055,7 +1055,7 @@
   {
     "id": "src/mosaic/raw/branches.rs:4",
     "path": "src/mosaic/raw/branches.rs",
-    "line": 245,
+    "line": 267,
     "symbol": "AsRef<[u8]> for LocalBuf::as_ref",
     "site": "unsafe { std::slice::from_raw_parts(self.right.data().add(self.range.start), self.len()) }",
     "proof": "families",

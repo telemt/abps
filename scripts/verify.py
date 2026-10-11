@@ -186,6 +186,26 @@ class VerificationError(RuntimeError):
     pass
 
 
+def kill_process_tree(process):
+    """Forcibly end a start_new_session child and its descendants on timeout.
+
+    POSIX kills the child's process group. Windows ignores start_new_session, so
+    taskkill /T follows the unreaped child (its open handle keeps the PID from
+    being reused) to every descendant still linked to it. Callers still record
+    the run as timed out.
+    """
+    if os.name != "nt":
+        os.killpg(process.pid, signal.SIGKILL)
+        return
+    taskkill = Path(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "taskkill.exe")
+    try:
+        subprocess.run([str(taskkill), "/T", "/F", "/PID", str(process.pid)], stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    process.kill()  # covers a missing or failed taskkill; no-op once the child has ended
+
+
 class Runner:
     def __init__(self, args):
         self.args = args
@@ -243,7 +263,7 @@ class Runner:
                 try:
                     code = p.wait(timeout=timeout or self.args.timeout)
                 except (subprocess.TimeoutExpired, KeyboardInterrupt):
-                    os.killpg(p.pid, signal.SIGKILL)
+                    kill_process_tree(p)
                     code = p.wait()
                     timed_out = True
             output = log.read_text(errors="replace")
@@ -618,7 +638,7 @@ def main():
     p.add_argument("--suite",required=True,choices=["registry","native","loom","properties","miri","asan","tsan","msan","coverage","fuzz","mutations","stress","allocations","performance"])
     p.add_argument("--profile",choices=["smoke","pr","nightly","weekly","release"],default="smoke")
     p.add_argument("--output",type=Path,required=True)
-    p.add_argument("--build-root",type=Path)
+    p.add_argument("--build-root",type=Path,help="Cargo build directory (default: OUTPUT/build). On Windows keep its absolute path within 106 characters: MSVC link.exe cannot create a build-script executable beyond MAX_PATH, and directed mutation targets add 69 characters to it.")
     p.add_argument("--timeout",type=int,default=1800)
     p.add_argument("--seed",type=int,default=424242)
     p.add_argument("--seeds")

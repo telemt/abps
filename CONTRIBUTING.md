@@ -392,6 +392,16 @@ reference uniqueness or race requirements. Prove both writes-before-consumer-rea
 and final-reader-completion-before-reuse; a reference decrement alone is not a
 complete reuse proof. A stopped or stale helper must also be covered.
 
+An access that lets another thread free storage, such as a final refund or root
+claim release, borrows only atomic words. Rust keeps a reference argument or a
+by-value field protected until its function returns; if it covers non-atomic
+bytes, including the padding of an aligned wrapper, the owner's concurrent
+deallocation is UB even after the last atomic operation (cf. rust-lang/rust#55005).
+Loom does not model this obligation; Miri regressions must explore many races
+per seed, because one schedule per seed rarely preempts inside that window.
+Any source edit moves each seed's schedule, so a negative control of this window
+passes its baseline under several seeds and needs a kill under only one of them.
+
 Never call user code, foreign destructors, allocation, formatting, logging, exporters, or
 potentially panicking work while safety invariants are broken. Each unsafe change
 must name the state transition it protects and include a regression that detects
@@ -473,7 +483,10 @@ retirement queue.
 Abandonment is a catastrophic-but-safe terminal condition. Expose an external
 diagnostic snapshot with `abps_abandoned_roots`, `abps_abandoned_bytes`, root identity,
 reservation, and outstanding ownership. Keep diagnostics bounded and usable after
-owner destruction; adapters must surface the event. There is no implicit process
+owner destruction; adapters must surface the event. The root identity is an opaque
+process-local value assigned once at preparation, never an address and never
+reused after destruction; exhaustion reports 0 rather than wrapping. Domain
+identities are scoped to their root. There is no implicit process
 reservation manager: applications bound aggregate roots, including abandoned ones.
 Forgetting an owner runs no destructor and produces no fictitious abandonment event.
 
@@ -494,9 +507,12 @@ creating replacements cannot be presented as freeing their reservations.
 
 Provide borrowed filled slices, `AsRef<[u8]>`-style access, and `IoSlice`-style
 descriptors in caller-provided or otherwise bounded storage. Constructing views and
-descriptors does not concatenate payloads. Owning conversions to foreign buffer
-types require source review and allocation measurement: zero-copy does not imply
-zero-allocation. They are not implicitly part of the prepared hot-path guarantee.
+descriptors does not concatenate payloads. One platform descriptor may cover
+fewer bytes than one view (Windows `IoSlice`: `u32::MAX`). Infallible accessors
+document that panic; fallible ones return `TooLarge`, and callers split views.
+Owning conversions to foreign buffer types require source review and allocation
+measurement: zero-copy does not imply zero-allocation. They are not implicitly
+part of the prepared hot-path guarantee.
 
 A generic [`std::io::Read`](https://doc.rust-lang.org/std/io/trait.Read.html)
 adapter must explicitly initialize the working region before passing `&mut [u8]`.
@@ -615,7 +631,8 @@ The following decisions specialize MEM/PROG/OWN/LIFE for this experiment:
 
 The sole issuer checks both lifecycle gates, pins the root, and reserves the full
 class charge with one compare-exchange attempt against the domain admission word.
-A failed CAS is Contended; an observed insufficient limit is BudgetExceeded.
+A failed CAS is Contended, even when only a concurrent remote refund changed the
+word far below the limit; an observed insufficient limit is BudgetExceeded.
 After admission, first load the bitmap and intersect the eligible mask. A positive
 hint can be claimed immediately. A zero hint is not a depletion proof: confirm it
 with exactly one Acquire fetch-or-zero, intersecting the same mask. A positive
@@ -642,8 +659,9 @@ publication, a stopped final Drop still owns an issued credit and live charge.
 After publication, its old charge is pending return even if the slot is reissued.
 The returning thread never accesses reusable slot metadata again: it refunds the
 saved domain, decrements that domain's allocation claims, and releases the root
-claim last. The domain and root stay pinned through those actions. This permits
-reuse-before-refund without letting an old return affect a new incarnation.
+claim last. The domain and root stay pinned through those actions, which borrow
+only these atomic words (OWN-03). This permits reuse-before-refund without
+letting an old return affect a new incarnation.
 
 The abstract admission categories remain those of MEM-02. Physical counters are
 admitted bytes and allocation claims; neither a bitmap nor a diagnostic sum is a
@@ -888,8 +906,11 @@ Berry opening resolves strictly increasing grants against sorted classes
 once, using fixed stack scratch for at most 64 private class indices. Work is
 O(C + G + sum(requested slots)), including mask selection. Preserve validation and
 error order: validate/resolve, Active gate, all grant availability, domain record,
-root claims, then commit. Before commit no rights or records change. After commit
-starts there are no fallible operations, allocations, or external callbacks.
+root claims, then commit. Mosaic and the reference oracle report this same order
+for one sequential history; only the maintenance outcome is normalized, because
+the reference has no pending FIFO. Before commit no rights or records change.
+After commit starts there are no fallible operations, allocations, or external
+callbacks.
 Errors preserve this request's claims and every grant partition. Empty grants
 remain valid. Remote Drop and issuer maintenance keep their SI-01/05 protocol;
 no grant atomics or extra work is moved onto returners. Reference resolution stays
@@ -954,9 +975,11 @@ buffer. `admitted = pending_acquire + live + pending_return <= domain_limit`.
 Reserve with one checked CAS before claiming capacity. Rollback publishes any
 claimed slot before refunding. The last owner performs release/acquire refcount
 synchronization, copies all return operands, publishes its bitmap bit with Release,
-and refunds admitted with Release as its LAST storage access. Never reread reusable
-slot metadata after publication. Completed Drop has three RMWs; there is no root
-or allocation-count RMW. A stopped return pins its remaining positive charge. Equivalently, admitted is
+and refunds admitted with Release as its LAST storage access, borrowing only the
+admitted word: the 64-byte-aligned ledger has non-atomic padding (OWN-03). Never
+reread reusable slot metadata after publication. Completed Drop has three RMWs;
+there is no root or allocation-count RMW. A stopped return pins its remaining
+positive charge. Equivalently, admitted is
 the sum of the positive capacities of all allocations whose admission/ownership/
 return has not completed its final refund, including guards and published returns.
 Assertions of equality use quiescence or deliberately paused transitions; ordinary
@@ -1219,8 +1242,9 @@ origin rewrite, even when a remote return publishes between those reads.
 
 Copy all return operands before publishing a free bit. Publication permits immediate
 reuse; neither slot metadata nor a branch sidecar may be accessed afterwards. The
-Mosaic final refund is the last storage access. Test reuse before old refund,
-including reuse of the same sidecar, using the production transitions.
+Mosaic final refund is the last storage access and borrows only the admitted word.
+Test reuse before old refund, including reuse of the same sidecar, using the
+production transitions.
 
 ### AP-03: Lifetime is proved by drain
 

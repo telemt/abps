@@ -3,6 +3,10 @@
 
 Only a compiled, named failing regression kills a mutant. Survivors, compiler
 failures and timeouts retain separate outcomes and require review.
+
+On Windows keep the absolute --output path within 155 characters: each control
+builds in <output>/target/<hash>, and MSVC link.exe cannot create a build-script
+executable beyond MAX_PATH.
 """
 import argparse
 import json
@@ -11,7 +15,7 @@ from pathlib import Path
 import shutil
 import signal
 import subprocess
-from mutation_support import classify, run_case
+from mutation_support import classify, create_case_target, run_case
 
 ROOT = Path(__file__).resolve().parents[1]
 FULL = "local-branches-spike,bytes-interop"
@@ -19,6 +23,9 @@ FULL = "local-branches-spike,bytes-interop"
 
 def cases():
     result = []
+    # Each published return refunds through the borrowed admitted word (OWN-03).
+    final_refund = {"berry": "self.admitted.fetch_sub(self.charge, Ordering::Release);",
+                    "mosaic": "refund_admitted(self.admitted, self.charge);"}
     for backend in ["berry", "mosaic"]:
         protocol = f"src/{backend}/protocol.rs"
         raw = f"src/{backend}/raw.rs"
@@ -30,7 +37,7 @@ def cases():
              regression+"abps_failure_idempotence_and_exact_budget_boundary"),
             (backend+"-relaxed-publication", protocol, "self.0.fetch_or(bit, Ordering::Release);", "self.0.fetch_or(bit, Ordering::Relaxed);", loom,
              backend+"::protocol::tests::final_reader_happens_before_overwrite_without_join_synchronization"),
-            (backend+"-lost-refund", protocol, "self.domain.refund(self.charge);", "let _ = self.charge;", native,
+            (backend+"-lost-refund", protocol, final_refund[backend], "let _ = self.charge;", native,
              regression+"abps_failure_idempotence_and_exact_budget_boundary"),
             (backend+"-lost-reference-release", protocol, "self.0.fetch_sub(1, Ordering::Release) != 1", "self.0.load(Ordering::Relaxed) != 1", loom,
              backend+"::protocol::tests::si10_batch_rollback_races_with_release_without_returning_original"),
@@ -67,7 +74,17 @@ def cases():
         ("branch-lost-final-family-right", "src/mosaic/protocol/branches.rs", "old == 1", "false",
          ["--features","local-branches-spike,loom-model","--lib"], "mosaic::protocol::tests::local_branches::br03_local_readers_happen_before_slot_and_sidecar_reuse_without_join"),
     ])
+    last_claim = "berry::protocol::tests::life02_last_claim_observation_acquires_every_prior_return_before_destroy"
+    claim_load = "        self.0.load(Ordering::Acquire)\n    }\n    /// LIFE-02/AP-03: called only by the closed sole owner."
     result.extend([
+        ("berry-relaxed-root-claim-release", "src/berry/protocol.rs", "self.0.fetch_sub(1, Ordering::Release);", "self.0.fetch_sub(1, Ordering::Relaxed);",
+         ["--features","local-branches-spike,loom-model","--lib"], last_claim),
+        ("berry-relaxed-root-claim-load", "src/berry/protocol.rs", claim_load, claim_load.replace("Acquire", "Relaxed"),
+         ["--features","local-branches-spike,loom-model","--lib"], last_claim),
+        ("reference-open-claims-before-record", "src/reference/mod.rs",
+         "        if state.free_domains.is_empty() {\n            return Err(Error::DomainCapacityExhausted);\n        }\n        self.root.check_handles(2)?;",
+         "        self.root.check_handles(2)?;\n        if state.free_domains.is_empty() {\n            return Err(Error::DomainCapacityExhausted);\n        }",
+         ["--features",FULL,"--test","model"], "si09_open_error_order_matches_reference_in_issuer_backends"),
         ("berry-drain-without-allocation-gate", "src/berry/protocol.rs", "self.allocations.load(Ordering::Acquire) == 0 && self.admitted.load(Ordering::Acquire) == 0", "self.admitted.load(Ordering::Acquire) == 0",
          ["--features","local-branches-spike,loom-model","--lib"], "berry::protocol::tests::closed_two_allocation_drain_gates_record_reuse_before_join"),
         ("mosaic-redundant-search-pass", "src/mosaic/protocol.rs", "for confirm in [false, true] {", "for confirm in [false, false, true] {", ["--features",FULL,"--lib"],
@@ -101,7 +118,7 @@ def main():
         for child in ["src","tests","examples","benches","verification","build.rs","Cargo.toml","Cargo.lock"]:
             if (ROOT/child).is_dir(): shutil.copytree(ROOT/child,source/child,ignore=shutil.ignore_patterns("artifacts","target","__pycache__"))
             else: shutil.copy2(ROOT/child,source/child)
-        target=directory/"target"
+        target=create_case_target(args.output,name)
         env=dict(os.environ,CARGO_TARGET_DIR=str(target.resolve()),RUSTFLAGS="",CARGO_ENCODED_RUSTFLAGS="")
         load_variant=name.endswith("-acquire-load")
         if load_variant: env.update(RUSTFLAGS="--cfg abps_tsan",CARGO_ENCODED_RUSTFLAGS="--cfg\x1fabps_tsan")

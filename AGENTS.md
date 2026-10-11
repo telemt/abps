@@ -70,7 +70,10 @@ the reference oracle. No new atomics or grant work belong on remote final Drop.
 SI-11..15 authorize the separate Mosaic backend (`mosaic-spike`). Positive
 admitted charge protects storage through the final refund; control counts stay
 issuer-local. Never access storage after that refund or a reusable slot after bit
-publication. Exact depleted errors require the confirming RMW pass and its proof.
+publication. Final refunds and claim releases borrow only atomic words, never an
+aligned record with padding (OWN-03); keep their schedule-dense Miri regressions
+and multi-seed negative controls.
+Exact depleted errors require the confirming RMW pass and its proof.
 Keep sparse grants prepared, disjoint and pinned through full drain; no grant work
 belongs on remote return. Borrowed views do not create ownership. Preserve Berry
 and the safe reference as baselines. Test actual production transitions with Loom,

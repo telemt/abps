@@ -210,6 +210,37 @@ fn si11_teardown_after_refund_without_join_synchronization() {
     }
 }
 #[test]
+fn si11_final_refund_races_teardown_across_many_schedules() {
+    // SI-11/AP-02, LIFE-02: the owner may free the arena once it acquires a
+    // zero charge, while the returner is still inside its final refund. Miri
+    // reports a protected borrow of non-atomic storage across that refund only
+    // in schedules preempting the returner there (about 1% per race), so one
+    // seed runs hundreds of races. A persistent returner keeps races cheap and
+    // the busy owner loop keeps observation and deallocation in one slice.
+    // The channel orders only the handoff, never the final refund.
+    let rounds = if cfg!(miri) { 256 } else { 512 };
+    let (tx, rx) = std::sync::mpsc::channel::<Buf>();
+    let returner = std::thread::spawn(move || rx.into_iter().for_each(drop));
+    for _ in 0..rounds {
+        let mut owner = StorageOwner::prepare(&config(1, 1)).unwrap();
+        let pool = owner.activate().unwrap();
+        let (a, d) = pool.try_open_domain(16).unwrap();
+        let frame = d.try_acquire(1).unwrap().freeze();
+        drop((d, a, pool));
+        tx.send(frame).unwrap();
+        loop {
+            match owner.try_destroy() {
+                Ok(()) => break,
+                Err(Error::Busy) if cfg!(miri) => {}
+                Err(Error::Busy) => std::thread::yield_now(),
+                result => panic!("unexpected destroy: {result:?}"),
+            }
+        }
+    }
+    drop(tx);
+    returner.join().unwrap();
+}
+#[test]
 fn si11_controls_are_separate_from_allocation_and_ref_limits() {
     let mut c = config(2, 1);
     c.control_handle_limit = 4;
@@ -347,6 +378,8 @@ fn si14_borrow_initialization_neighbor_bounds_and_batch_unwind() {
     y.set_filled_len(16).unwrap();
     assert_eq!(borrowed.as_ref(), b"bcd");
     assert_eq!(borrowed.as_io_slice().as_ref(), b"bcd");
+    assert_eq!(borrowed.try_as_io_slice().unwrap().as_ref(), b"bcd");
+    assert_eq!(x.try_as_io_slice().unwrap().as_ref(), x.as_ref());
     assert_eq!(x.try_view(0..17).err(), Some(Error::InvalidRange));
     assert_eq!(x.lease.slot().references.load(), 1);
     for k in [0, 1, 20] {
@@ -385,6 +418,23 @@ fn si14_pages_include_free_records_without_maintenance() {
         Err(Error::InvalidRange)
     );
     finish(owner, pool, a, d);
+}
+#[test]
+fn life02_root_identity_is_opaque_and_survives_storage_reuse() {
+    // LIFE-02: diagnostics outlive their owner, so a destroyed root's identity
+    // must not reappear when the allocator reuses its arena for a new root.
+    let first = StorageOwner::prepare(&config(1, 1)).unwrap();
+    let observer = first.diagnostics().unwrap();
+    let address = first.root.unwrap().0.as_ptr().addr();
+    drop(first);
+    let second = StorageOwner::prepare(&config(1, 1)).unwrap();
+    let (old, new) = (
+        observer.snapshot(),
+        second.diagnostics().unwrap().snapshot(),
+    );
+    assert!(old.destroyed);
+    assert!(old.root_identity != 0 && new.root_identity > old.root_identity);
+    assert_ne!(old.root_identity, address, "no heap address is exported");
 }
 #[test]
 fn si11_forget_and_early_owner_drop_are_observable_not_reclamation() {

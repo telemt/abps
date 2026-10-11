@@ -20,6 +20,47 @@ fn error<T>(result: Result<T, Error>) -> Error {
 }
 
 #[test]
+fn life02_root_identity_is_assigned_once_not_an_address() {
+    let (mut first, _) = configured(1, 1);
+    let second = StorageOwner::prepare(Config::new(
+        vec![ClassConfig {
+            capacity: 64,
+            slots: 1,
+        }],
+        1,
+        1 << 20,
+    ))
+    .unwrap();
+    let a = first.root().unwrap().identity;
+    let b = second.root().unwrap().identity;
+    assert!(a != 0 && b > a);
+    assert_ne!(a, Arc::as_ptr(first.root().unwrap()) as usize);
+    first.try_destroy().unwrap();
+}
+
+#[test]
+fn io01_platform_descriptor_limit_is_an_explicit_error() {
+    // Windows IoSlice lengths are 32-bit and std panics above them; the limit
+    // is checked on lengths alone, without a 4 GiB allocation.
+    assert!(io_slice_fits(0) && io_slice_fits(u32::MAX as usize));
+    #[cfg(target_pointer_width = "64")]
+    assert_eq!(io_slice_fits(u32::MAX as usize + 1), !cfg!(windows));
+    let (mut owner, pool) = configured(1, 1);
+    let (authority, domain) = pool.try_open_domain(64).unwrap();
+    let mut buffer = domain.try_acquire(5).unwrap();
+    buffer.put_slice(b"frame").unwrap();
+    let frame = buffer.freeze();
+    let view = frame.try_slice(1..4).unwrap();
+    assert_eq!(frame.try_as_io_slice().unwrap().as_ref(), b"frame");
+    assert_eq!(
+        view.try_as_io_slice().unwrap().as_ref(),
+        view.as_io_slice().as_ref()
+    );
+    drop((view, frame, domain, authority, pool));
+    owner.try_destroy().unwrap();
+}
+
+#[test]
 fn mem02_prog01_failure_at_each_admission_stage_restores_all_ledgers() {
     let (mut owner, pool) = configured(2, 1);
     let (authority, domain) = pool.try_open_domain(128).unwrap();

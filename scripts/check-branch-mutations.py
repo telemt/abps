@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""BR regressions must detect broken transitions in isolated source/target trees."""
+"""BR regressions must detect broken transitions in isolated source/target trees.
+
+On Windows keep the absolute --output path within 155 characters: each control
+builds in <output>/target/<hash>, and MSVC link.exe cannot create a build-script
+executable beyond MAX_PATH.
+"""
 import argparse
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
-from mutation_support import run_case
+from mutation_support import create_case_target, run_case
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -41,7 +46,7 @@ def main():
          "mosaic::protocol::tests::si11_reuse_before_old_refund_keeps_old_charge_pinned", {}),
         ("refund-before-publication", "src/mosaic/protocol.rs",
          [("self.class.publish(self.bit);", "self.domain.refund(self.charge);\n        self.class.publish(self.bit);"),
-          ("        self.domain.refund(self.charge);\n\n        // SI-11:", "        // SI-11:")], None,
+          ("        refund_admitted(self.admitted, self.charge);\n\n        // SI-11:", "        // SI-11:")], None,
          ["--features", "local-branches-spike,loom-model", "--lib"],
          "mosaic::protocol::tests::si11_reuse_before_old_refund_keeps_old_charge_pinned", {}),
     ]
@@ -56,7 +61,7 @@ def main():
             else:
                 shutil.copy2(ROOT / child, source / child)
         edits = old if isinstance(old, list) else [(old, new)]
-        env = dict(os.environ, CARGO_TARGET_DIR=str((directory / "target").resolve()), RUSTFLAGS="", CARGO_ENCODED_RUSTFLAGS="") | overrides
+        env = dict(os.environ, CARGO_TARGET_DIR=str(create_case_target(args.output, name)), RUSTFLAGS="", CARGO_ENCODED_RUSTFLAGS="") | overrides
         command = ["cargo", "test", "--locked", *flags, test, "--", "--exact"]
         result = run_case(name,source,file,edits,command,test,env)
         caught = result["caught"]

@@ -114,8 +114,19 @@ impl Branch {
     pub fn try_view(&self, range: Range<usize>) -> Result<BufView<'_>, Error> {
         self.inner.try_view(range)
     }
+    /// Borrowed descriptor of this branch's bytes.
+    ///
+    /// # Panics
+    ///
+    /// On Windows when the view exceeds `u32::MAX` bytes, as `IoSlice::new`
+    /// does. [`Branch::try_as_io_slice`] reports `TooLarge` instead.
     pub fn as_io_slice(&self) -> IoSlice<'_> {
         IoSlice::new(self.as_ref())
+    }
+    /// IO-01: `TooLarge` when one platform descriptor cannot cover this view;
+    /// split it with a narrower `try_view`.
+    pub fn try_as_io_slice(&self) -> Result<IoSlice<'_>, Error> {
+        self.inner.try_as_io_slice()
     }
 }
 impl AsRef<[u8]> for Branch {
@@ -198,8 +209,19 @@ impl LocalBuf {
     pub fn backing_capacity(&self) -> usize {
         self.right.record().capacity
     }
+    /// Borrowed descriptor of this view's bytes.
+    ///
+    /// # Panics
+    ///
+    /// On Windows when the view exceeds `u32::MAX` bytes, as `IoSlice::new`
+    /// does. [`LocalBuf::try_as_io_slice`] reports `TooLarge` instead.
     pub fn as_io_slice(&self) -> IoSlice<'_> {
         IoSlice::new(self.as_ref())
+    }
+    /// IO-01: `TooLarge` when one platform descriptor cannot cover this view;
+    /// split it with `try_view` or `try_slice`. No atomic or ownership change.
+    pub fn try_as_io_slice(&self) -> Result<IoSlice<'_>, Error> {
+        crate::reference::try_io_slice(self.as_ref())
     }
     pub fn try_view(&self, range: Range<usize>) -> Result<BufView<'_>, Error> {
         self.as_ref()
