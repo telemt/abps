@@ -189,8 +189,9 @@ transition. A generic SAFETY paragraph or passing stress run is not a substitute
   caller's workaround or weakening a check.
 - Inspect manifests and harnesses before selecting commands. The repository root
   is one unpublished library package: implementation in `src/`, integration tests
-  in `tests/`, and runnable examples in `examples/`. The Linux reference CI workflow
-  covers this package; production validation and other targets remain separate evidence.
+  in `tests/`, and runnable examples in `examples/`. This checkout has verification
+  scripts but no GitHub Actions workflows. Historical local/CI configuration and
+  production validation remain separate evidence; do not claim unexecuted jobs.
 - Introduce deterministic accounting/lifecycle tests, independent model/property
   tests, focused Miri, and production-protocol Loom as applicable. Include
   interrupted returns/helpers, stale reuse, close races, forget, and allocation

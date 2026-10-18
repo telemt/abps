@@ -393,14 +393,17 @@ and final-reader-completion-before-reuse; a reference decrement alone is not a
 complete reuse proof. A stopped or stale helper must also be covered.
 
 An access that lets another thread free storage, such as a final refund or root
-claim release, borrows only atomic words. Rust keeps a reference argument or a
-by-value field protected until its function returns; if it covers non-atomic
-bytes, including the padding of an aligned wrapper, the owner's concurrent
-deallocation is UB even after the last atomic operation (cf. rust-lang/rust#55005).
-Loom does not model this obligation; Miri regressions must explore many races
-per seed, because one schedule per seed rarely preempts inside that window.
-Any source edit moves each seed's schedule, so a negative control of this window
-passes its baseline under several seeds and needs a kill under only one of them.
+claim release, borrows only atomic words. Ending explicit reads/writes is not
+sufficient: a live call's protected borrow must not cover non-atomic bytes that
+the owner may deallocate, including padding in an aligned record. The terminal
+borrow must exclude those bytes; see the [final-refund correction](docs/final-refund.md)
+and the related [Rust lifetime discussion](https://github.com/rust-lang/rust/issues/55005).
+Loom checks the atomic protocol but does not model raw storage borrow protectors.
+Miri regressions exercise this obligation with many teardown races per seed.
+Source or toolchain changes can change a seed's schedule; a directed control
+must pass every selected unmodified baseline and detect the mutation under at
+least one selected schedule. A surviving set remains unverified, and a timeout
+or build failure never becomes a successful detection.
 
 Never call user code, foreign destructors, allocation, formatting, logging, exporters, or
 potentially panicking work while safety invariants are broken. Each unsafe change
@@ -483,11 +486,15 @@ retirement queue.
 Abandonment is a catastrophic-but-safe terminal condition. Expose an external
 diagnostic snapshot with `abps_abandoned_roots`, `abps_abandoned_bytes`, root identity,
 reservation, and outstanding ownership. Keep diagnostics bounded and usable after
-owner destruction; adapters must surface the event. The root identity is an opaque
-process-local value assigned once at preparation, never an address and never
-reused after destruction; exhaustion reports 0 rather than wrapping. Domain
-identities are scoped to their root. There is no implicit process
-reservation manager: applications bound aggregate roots, including abandoned ones.
+owner destruction; adapters must surface the event. A nonzero root identity is an
+opaque process-local value assigned once at preparation, never an address and
+never reused after destruction. Exhaustion reports 0 (unassigned) rather than
+wrapping; zero can recur and must not be treated as a unique root key. Domain
+identities are scoped to their root: collectors use assigned root identity plus
+DomainIdentity, and handle unassigned roots without merging their accounting.
+These diagnostic values are not persistent or wire identifiers. There is no
+implicit process reservation manager: applications bound aggregate roots,
+including abandoned ones.
 Forgetting an owner runs no destructor and produces no fictitious abandonment event.
 
 A design such as an ordinary `Arc<PoolInner>` is not sufficient if its last buffer
@@ -508,8 +515,10 @@ creating replacements cannot be presented as freeing their reservations.
 Provide borrowed filled slices, `AsRef<[u8]>`-style access, and `IoSlice`-style
 descriptors in caller-provided or otherwise bounded storage. Constructing views and
 descriptors does not concatenate payloads. One platform descriptor may cover
-fewer bytes than one view (Windows `IoSlice`: `u32::MAX`). Infallible accessors
-document that panic; fallible ones return `TooLarge`, and callers split views.
+fewer bytes than one view (Windows `IoSlice`: `u32::MAX`). The limit applies to the
+view's length, not its backing capacity. Infallible `as_io_slice` documents that
+panic; `try_as_io_slice` returns `TooLarge`, and callers split views explicitly.
+Creating either borrowed descriptor neither copies bytes nor adds ownership.
 Owning conversions to foreign buffer types require source review and allocation
 measurement: zero-copy does not imply zero-allocation. They are not implicitly
 part of the prepared hot-path guarantee.
@@ -1045,7 +1054,8 @@ and <=n*C*W masks; adapters use n<=32. Charge arrays, free stacks and all paddin
 ### SI-14: Borrowed views and bounded batch construction
 
 Buf::try_view(range) returns BufView<'_>, a checked borrowed initialized byte range
-with AsRef<[u8]> and as_io_slice. Copy/Clone never touch refcounts; lifetime cannot
+with AsRef<[u8]>, as_io_slice and try_as_io_slice under IO-01's descriptor bounds.
+Copy/Clone never touch refcounts; lifetime cannot
 exceed its owner. Keep one owner per processing branch and bounded borrowed I/O
 descriptors. Independent ownership still requires checked try_clone/try_slice.
 Batch validates destination first: K=0 returns immediately, K=1 uses scalar clone,
@@ -1080,7 +1090,7 @@ Report requested versus charged bytes and equal-budget counterfactuals.
 
 The selected layout target is 64 streams, two roots, 20 subscribers, queue 8 and
 writer batch 8: E=321, 10272 slots/class/root, 161 words on 64-bit. Historical frame
-classes require 41.38 GiB backing plus metadata. CI validates this layout without
+classes require 41.38 GiB backing plus metadata. The layout test validates this without
 allocating it; full execution requires an appropriately provisioned host. A covered
 envelope is not a progress, successful CAS, or delivery guarantee. Optional read_buf
 preserves initialization/slot boundaries; generic Read still needs initialized
@@ -1472,15 +1482,14 @@ not evidence that a campaign ran.
 
 ### Intended CI and evidence
 
-These are production validation objectives. The
-[native workflow](.github/workflows/reference.yml) retains formatting, Clippy,
-unit/property/async tests, doctests, TCP policies and prepared allocation checks.
-The [verification workflow](.github/workflows/verification.yml) adds the executable
-registry, explicit native feature matrix, separate Loom profiles, strict-provenance
-Miri with exact intentional-retention exceptions, coverage, sanitizers and scheduled
-campaigns. See the [verification guide](docs/verification.md) for commands and
-limitations. Historical local evidence remains in the spike/AP/depletion reports;
-a configured job is not a completed remote CI run or production certification.
+These are production validation objectives, not configured GitHub jobs. The
+published checkout contains verification scripts and a registry, but no GitHub
+Actions workflows. Run the [verification commands](docs/verification.md) locally
+for the explicit feature matrix, Loom variants, Miri with exact retention
+exceptions, coverage and sanitizers. Historical reports may mention workflows
+from their local source snapshots; they do not establish current CI availability.
+Each result needs its source, configuration and execution record. A future
+configured job would still not be a completed remote run or production approval.
 
 | Frequency | Coverage |
 | --- | --- |
@@ -1491,9 +1500,9 @@ a configured job is not a completed remote CI run or production certification.
 
 Publish exact commands, features, toolchains, seeds, model bounds, and unsupported
 configurations with each harness. `cargo fmt --check`, `cargo clippy`,
-`cargo test`, and `cargo +nightly miri test` become applicable once their crate
-and suites exist. Nightly verification tools do not change the stable shipping
-baseline.
+`cargo test`, and pinned nightly Miri commands exercise the current crate's
+applicable suites. Nightly verification tools do not change the stable shipping
+baseline; an available command alone is not execution evidence.
 
 [Miri](https://github.com/rust-lang/miri), [Loom](https://docs.rs/loom/latest/loom/),
 [proptest](https://docs.rs/proptest/latest/proptest/), and
@@ -1553,9 +1562,12 @@ assumptions. Optional CPU routines require baseline support and feature dispatch
 
 Publish four independent evidence columns for every target: **builds**, **tests
 pass**, **concurrency validated**, and **performance characterized**. A compile-only
-target has only build evidence. Production columns remain unverified; only the
-reference crate has local Linux x86_64 GNU build/test evidence. Reference mutex
-race tests are not an accepted Shared concurrency proof or performance evidence.
+target has only build evidence. The imported reports contain historical Linux
+x86_64 GNU executions for the experimental backends; upstream's final-refund
+review also reports Windows x86_64 Miri observations. Each claim applies only to
+its recorded source, tool and target, not an entire platform matrix. Production
+acceptance remains open. Reference mutex race tests are not an accepted Shared
+concurrency proof or performance evidence.
 
 | Target | Initial validation objective |
 | --- | --- |

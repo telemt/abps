@@ -3,6 +3,7 @@
 /fuzz/artifacts/
 /fuzz/corpus/
 /verification/artifacts/
+/docs/evidence/
 /mutants.out/
 /mutants.out.old/
 *.pyc

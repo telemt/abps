@@ -107,18 +107,24 @@ check the boundary without crediting thread join as the synchronization proof.
 
 The last access is also a Rust borrow obligation (OWN-03). The owner may free the
 arena while the returner's frame is still live, and a protected reference to
-non-atomic bytes would outlive that deallocation. Mosaic's 64-byte-aligned ledger
-has 56 padding bytes: refunding through `&DomainLedger` was UB in both Stacked and
-Tree Borrows. Each PublishedReturn therefore holds only `&AtomicUsize` words, and
-Berry's `Claims` is `repr(transparent)`, so neither correctness depends on layout.
-Miri sees the window only when a schedule preempts the returner inside it (about
-1% of races), so three regressions run hundreds of races per seed with a
-persistent returner: ordinary Buf, branch families and Berry claims. In a local
+non-atomic bytes would outlive that deallocation. On the reported 64-bit target,
+Mosaic's 64-byte-aligned ledger has 56 padding bytes: refunding through
+`&DomainLedger` was UB under both Stacked and Tree Borrows. Mosaic PublishedReturn
+now holds only the admitted atomic word; Berry holds the admitted/allocation
+atomic words and `repr(transparent)` Claims. Their terminal borrows do not rely
+on an unconstrained wrapper layout having no padding. See the
+[correction and evidence boundaries](docs/final-refund.md).
+
+Upstream `668d2f3` reports the following schedule-sensitivity observations; these
+are attributed measurements, not new runs or a portable detection-rate guarantee.
+Miri saw the window when a schedule preempted the returner inside it (about 1% of
+races in that sample), so three regressions run hundreds of races per seed with a
+persistent returner: ordinary Buf, branch families and Berry claims. In its local
 Miri sample (nightly, Windows x86_64) the ordinary Buf regression exposed the
 old refund on all 16 seeds; the adversarial review found it with the earlier
 single-race teardown tests on none of 64 seeds. Per-seed detection is weaker for
 the shorter Berry claim window and for the branch root's longer drain pass, and
-an unrelated source edit moves every seed's schedule: after one such edit 128
+an unrelated source edit can change each seed's schedule: after one such edit 128
 Berry races caught the padded control on 7 of 16 seeds, and 128 branch races
 on the shared two-record fixture on 4. Berry now runs 512 races (15 of 16), and
 the branch regression races a one-slot, one-record root 256 times (15 of 16).
@@ -133,7 +139,9 @@ LIFE-02. Diagnostics Send/Sync shares only immutable data and atomics in a separ
 record. Checked references protect record access; the final cold observer uses
 release/acquire synchronization before deallocation. Arena destruction publishes
 its result and relinquishes its diagnostic right. Observers can outlive the owner;
-abandoned roots remain observable. The intentional-retention allowlist is exact
+abandoned roots remain observable. Assigned nonzero root identities are opaque,
+process-local and never reused; exhausted/unassigned zero is not a unique key.
+Domain identities are root-scoped. The intentional-retention allowlist is exact
 and finite. Ordinary Miri/ASan checks keep leak detection enabled.
 
 ### observations
@@ -261,7 +269,7 @@ failure, and a named detector must pass unmodified before its mutation is counte
 The next-wave ABPS-001..032 checklist is registered in `verification/matrix.json`
 alongside exact selectors, applicability, preconditions, oracles and detectors.
 These review IDs refer to existing normative invariants; registration alone does
-not claim a completed campaign. [The conservation report](docs/rights-verification-2026-10-10.md)
+not claim a completed campaign. [The conservation report](docs/reports/2026-10-10/rights-verification.md)
 records the actual source, runs, limitations and negative-control outcomes.
 
 The independent concrete oracle keeps logical identities stable during replay and
@@ -288,7 +296,7 @@ local delivery and bounded writer batches, including cancellation. Tokio interna
 remain outside Loom coverage. Historical TSan/fence qualifications still apply.
 
 Use [the verification guide](docs/verification.md) and the runner's `results.json`.
-The [2026-10-10 local report](docs/verification-2026-10-10.md) includes successful
+The [2026-10-10 local report](docs/reports/2026-10-10/verification.md) includes successful
 campaigns, mutation timeouts and the unsuppressed TSan finding with its control.
 Each run records source identity, exact command/features, seeds, tool versions,
 exploration limits, logs and completion status. A successful bounded Loom run is
