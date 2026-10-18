@@ -109,6 +109,18 @@ fn main() -> Result<()> {
         );
         return Ok(());
     }
+    #[cfg(feature = "mosaic-spike")]
+    if args.get("case", "core") == "local-queue" {
+        let probe = spike_support::network::local_queue_allocation_probe(
+            GLOBAL,
+            args.n("iterations", 10000),
+        )?;
+        println!(
+            "{}",
+            json!({"positive_control":value(control),"local_queue":probe})
+        );
+        return Ok(());
+    }
     let size = args.n("size", 1500);
     let backend = args.get("backend", "berry");
     let setup = Region::new(GLOBAL);

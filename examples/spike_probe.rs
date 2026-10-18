@@ -23,11 +23,15 @@ fn main() -> Result<()> {
         "observe" => spike_support::observe(&args)?,
         "tcp" => match args.get("role", "server") {
             "server" => spike_support::network::server(&args)?,
+            "plan" => spike_support::network::resource_plan(&args)?,
             "loadgen" => spike_support::network::loadgen(&args)?,
-            _ => return Err("role must be server or loadgen".into()),
+            _ => return Err("role must be plan, server or loadgen".into()),
         },
         _ => return Err("case must be micro, observe, or tcp".into()),
     };
     println!("{}", json!({"args":args.0,"result":result}));
+    if result.get("failed").and_then(serde_json::Value::as_bool) == Some(true) {
+        return Err("measurement reported failure; JSON retained above".into());
+    }
     Ok(())
 }

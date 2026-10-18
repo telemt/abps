@@ -11,29 +11,7 @@ import subprocess
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-CPU_ORDER = [0, 2, 4, 6, 8, 1, 3, 5]
-
-
-def validate_flow(result):
-    """Conservation of workload counters, independent of allocator ledgers."""
-    if "pipeline" in result:
-        result = result["pipeline"]
-    if "source" not in result:
-        return
-    source = result["source"]
-    assert source["planned"] == (
-        source["attempted"] + source["missed_arrivals"] + source["not_attempted_after_stop"])
-    assert source["sent"] <= source["attempted"]
-    assert result["accepted"] <= source["sent"]
-    assert result["accepted"] * result["subscribers"] == (
-        result["enqueued"] + result["skipped"] + result["queue_rejected"] +
-        result["no_subscriber_deliveries"])
-    delivered = sum(c["delivered"] for c in result["consumers"])
-    assert delivered == result["total"]["delivered"]
-    assert result["total"]["scheduled_arrival_latency"]["samples"] == delivered
-    assert result["enqueued"] == delivered + result["undelivered_enqueued"]
-    assert result["drained"]["admitted"] == 0
-    assert result["drained"]["available"] == result["drained"]["total_slots"]
+from performance_support import SCHEMA, cpu_selection, read_records, require, validate_reference_flow as validate_flow, validate_probe_envelope
 
 
 def environment():
@@ -46,10 +24,10 @@ def environment():
         "affinity_available": sorted(os.sched_getaffinity(0)),
         "loadavg": Path("/proc/loadavg").read_text().strip(),
         "perf_event_paranoid": Path("/proc/sys/kernel/perf_event_paranoid").read_text().strip(),
-        "build": "release, debug=1, strip=none, default target CPU, no LTO override",
+        "build": "prebuilt; flags unknown unless build record supplied",
         "sources": {
             str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in [ROOT / "Cargo.toml", ROOT / "Cargo.lock", *sorted((ROOT / "src").rglob("*.rs")),
+            for p in [ROOT / "Cargo.toml", ROOT / "Cargo.lock", ROOT / "build.rs", *sorted((ROOT / "scripts").glob("*.py")), *sorted((ROOT / "src").rglob("*.rs")),
                       *sorted((ROOT / "examples").rglob("*.rs"))]
         },
     }
@@ -63,20 +41,34 @@ class Runner:
         self.raw = self.output / "results.jsonl"
         self.done = {}
         if self.raw.exists():
-            self.done = {r["id"]: r for r in map(json.loads, self.raw.read_text().splitlines())}
+            self.done = read_records(self.raw)
         env = self.output / "environment.json"
-        if not env.exists():
-            env.write_text(json.dumps(environment(), indent=2) + "\n")
+        identity = environment()
+        identity["binaries"] = {n: hashlib.sha256((options.target / "release/examples" / n).read_bytes()).hexdigest() for n in ("perf_probe", "perf_alloc")}
+        identity["build_record"] = json.loads(options.build_record.read_text()) if options.build_record else None
+        identity["affinity_kind"] = "SMT/logical" if options.smt else "one CPU per physical core"
+        identity["selected_cpus"] = cpu_selection(options.smt)
+        if env.exists():
+            old=json.loads(env.read_text())
+            for key in ("sources", "binaries", "build_record", "affinity_kind", "selected_cpus"):
+                require(old.get(key)==identity[key],str(env),"identity changed; use a new output directory")
+        else:
+            env.write_text(json.dumps(identity, indent=2) + "\n")
 
     def run(self, name, args, trial=0, alloc=False):
         key = f"{name}-{trial}"
         if key in self.done:
+            require(self.done[key]["requested_args"] == args, key, "configuration changed")
             return self.done[key]
-        cpus = [c for c in CPU_ORDER if c in os.sched_getaffinity(0)]
+        cpus = cpu_selection(self.options.smt)
         threads = int(args.get("threads", 1))
         count = 4 if args.get("case") == "tcp" else threads
         if "observe-hz" in args or args.get("case") == "handoff":
             count = max(count, 2)
+        if count > len(cpus):
+            record=dict(schema_version=SCHEMA, id=key,status="unvalidated",requested_args=args,reason="insufficient physical cores")
+            with self.raw.open("a") as out: out.write(json.dumps(record)+"\n")
+            return record
         affinity = ",".join(map(str, cpus[:count]))
         executable = self.options.target / "release/examples" / ("perf_alloc" if alloc else "perf_probe")
         cmd = ["taskset", "-c", affinity, str(executable)]
@@ -85,33 +77,39 @@ class Runner:
         stderr = self.output / f"{key}.stderr"
         start = time.monotonic()
         rss = []
-        with stdout.open("w") as out, stderr.open("w") as err:
-            process = subprocess.Popen(cmd, cwd=ROOT, stdout=out, stderr=err)
-            deadline = start + float(args.get("seconds", 2)) + float(args.get("warmup", .5)) + 30
-            while process.poll() is None:
-                try:
-                    status = Path(f"/proc/{process.pid}/status").read_text()
-                    current = next(int(s.split()[1]) for s in status.splitlines() if s.startswith("VmRSS:"))
-                    rss.append([round(time.monotonic() - start, 3), current])
-                except (OSError, StopIteration):
-                    pass
-                if time.monotonic() > deadline:
-                    process.kill()
-                    process.wait()
-                    raise RuntimeError(f"{key}: timeout, see {stderr}")
-                time.sleep(.02)
-        if process.returncode:
-            raise RuntimeError(f"{key}: exit {process.returncode}, see {stderr}: {stderr.read_text()}")
-        result = json.loads(stdout.read_text())
-        validate_flow(result["result"])
-        record = {
-            "id": key, "utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "command": cmd, "instrumented_alloc": alloc, "wall_s": time.monotonic() - start,
-            "rss_peak_kib": max((r[1] for r in rss), default=0),
-            "rss_samples": rss, **result,
-        }
-        with self.raw.open("a") as out:
-            out.write(json.dumps(record) + "\n")
+        record = dict(schema_version=SCHEMA, id=key, status="incomplete", requested_args=args,
+            command=cmd, errors=[], instrumented_alloc=alloc)
+        process = None
+        try:
+            with stdout.open("w") as out, stderr.open("w") as err:
+                process = subprocess.Popen(cmd, cwd=ROOT, stdout=out, stderr=err)
+                deadline = start + float(args.get("seconds", 2)) + float(args.get("warmup", .5)) + 30
+                while process.poll() is None:
+                    try:
+                        status = Path(f"/proc/{process.pid}/status").read_text()
+                        current = next(int(s.split()[1]) for s in status.splitlines() if s.startswith("VmRSS:"))
+                        rss.append([round(time.monotonic() - start, 3), current])
+                    except (OSError, StopIteration):
+                        pass
+                    if time.monotonic() > deadline:
+                        raise TimeoutError(f"{key}: timeout, see {stderr}")
+                    time.sleep(.02)
+            require(process.returncode == 0, key, f"exit {process.returncode}, see {stderr}")
+            result = json.loads(stdout.read_text())
+            record.update(result)
+            validate_flow(validate_probe_envelope(result,args))
+            record["status"] = "passed"
+        except Exception as error:
+            record.update(status="incomplete" if isinstance(error,TimeoutError) else "failed",errors=[str(error)])
+            raise
+        finally:
+            if process:
+                if process.poll() is None: process.kill()
+                process.wait()
+            record.update(exit_code=process.returncode if process else None,
+                utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),wall_s=time.monotonic()-start,
+                rss_peak_kib=max((r[1] for r in rss),default=0),rss_samples=rss)
+            with self.raw.open("a") as out: out.write(json.dumps(record)+"\n")
         self.done[key] = record
         detail = result["result"]
         rate = detail.get("metrics", {}).get("accepted_per_s", detail.get("accepted_per_planned_s", ""))
@@ -238,7 +236,9 @@ def main():
     parser.add_argument("--target", type=Path, default=Path("/tmp/abps-reference-target"))
     parser.add_argument("--seconds", type=float, default=2)
     parser.add_argument("--tcp-seconds", type=float, default=10)
-    parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--repeats", type=int, default=7)
+    parser.add_argument("--smt", action="store_true")
+    parser.add_argument("--build-record", type=Path)
     options = parser.parse_args()
     runner = Runner(options)
     print(f"raw results: {options.output}", flush=True)

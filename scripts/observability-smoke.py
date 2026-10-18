@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import verify
+from performance_support import physical_cpus
 
 
 def main():
@@ -22,10 +23,12 @@ def main():
         subprocess.run(['cargo','build','--locked','--release','--features',verify.FULL,'--example','spike_probe'],env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
     binary=args.build_root/'release/examples/spike_probe'
     rows=[]
+    cpus=physical_cpus()
+    if len(cpus)<2: raise RuntimeError("mixed observability requires two physical cores")
     for backend,slots,records,active in [('berry',64,256,16),('mosaic',64,256,16),('mosaic',129,4096,64)]:
         for op in ['grants','pages','busy-destroy','mixed']:
             for interval in ([0,1,32] if op=='mixed' else [32]):
-                cmd=[str(binary),'--case=observability',f'--backend={backend}',f'--op={op}',f'--class-slots={slots}',f'--records={records}',f'--active-domains={active}',f'--iterations={args.iterations}',f'--diagnostic-interval={interval}','--fragmentation=alternating']
+                cmd=[str(binary),'--case=observability',f'--backend={backend}',f'--op={op}',f'--class-slots={slots}',f'--records={records}',f'--active-domains={active}',f'--iterations={args.iterations}',f'--diagnostic-interval={interval}',f'--cpus={cpus[0]},{cpus[1]}','--fragmentation=alternating']
                 run=subprocess.run(cmd,text=True,capture_output=True,timeout=120)
                 entry=dict(command=cmd,exit_code=run.returncode,stdout=run.stdout,stderr=run.stderr)
                 rows.append(entry)
@@ -35,7 +38,7 @@ def main():
                 if not result['drained']: raise RuntimeError('teardown not confirmed')
                 if op=='mixed':
                     admission=result['admission']
-                    if admission['attempted']!=args.iterations+1: raise RuntimeError('lost admission attempts')
+                    if admission['attempted']!=args.iterations: raise RuntimeError('lost admission attempts')
                     if admission['accepted']<=0: raise RuntimeError('vacuous admission measurement')
                     if admission['useful_bytes']!=0: raise RuntimeError('empty buffers are not useful payload')
                     if result['charged_bytes']!=64*admission['accepted']: raise RuntimeError('lost charged bytes')

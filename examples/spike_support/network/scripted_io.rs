@@ -18,15 +18,15 @@ pub enum Step {
     Zero,
     OverReport,
 }
-pub struct ScriptedIo {
+pub struct ScriptedIo<'a> {
     pub steps: VecDeque<Step>,
-    pub input: &'static [u8],
+    pub input: &'a [u8],
     pub consumed: usize,
     pub output: Rc<RefCell<Vec<u8>>>,
     pub calls: usize,
 }
-impl ScriptedIo {
-    pub fn new(input: &'static [u8], steps: impl IntoIterator<Item = Step>) -> Self {
+impl<'a> ScriptedIo<'a> {
+    pub fn new(input: &'a [u8], steps: impl IntoIterator<Item = Step>) -> Self {
         Self {
             steps: steps.into_iter().collect(),
             input,
@@ -55,7 +55,7 @@ impl ScriptedIo {
         }
     }
 }
-impl AsyncRead for ScriptedIo {
+impl AsyncRead for ScriptedIo<'_> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -73,7 +73,7 @@ impl AsyncRead for ScriptedIo {
         Poll::Ready(Ok(()))
     }
 }
-impl AsyncWrite for ScriptedIo {
+impl AsyncWrite for ScriptedIo<'_> {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,

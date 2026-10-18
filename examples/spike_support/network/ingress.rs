@@ -19,7 +19,7 @@ impl Decisions {
 fn preflight(
     subscribers: &mut [Subscriber],
     skip: bool,
-) -> ([Option<mpsc::Permit<'_, Message>>; 20], Decisions) {
+) -> ([Option<local_queue::IngressPermit<'_>>; 20], Decisions) {
     let mut permits = std::array::from_fn(|_| None);
     let mut decisions = Decisions::default();
     for (subscriber, slot) in subscribers.iter_mut().zip(&mut permits) {
@@ -29,7 +29,7 @@ fn preflight(
         }
         match subscriber.queue.try_reserve() {
             Ok(permit) => *slot = Some(permit),
-            Err(mpsc::error::TrySendError::Full(_)) if skip => decisions.skipped += 1,
+            Err(local_queue::Rejected::Full) if skip => decisions.skipped += 1,
             Err(_) => {
                 decisions.rejected += 1;
                 decisions.disconnected += 1;
@@ -157,7 +157,7 @@ pub(super) async fn run(session: Session, settings: Settings) -> Result<IngressS
     )
     .await
 }
-async fn run_io<S: AsyncRead + tokio::io::AsyncWrite + Unpin>(
+pub(super) async fn run_io<S: AsyncRead + tokio::io::AsyncWrite + Unpin>(
     mut socket: S,
     origin: Origin,
     mut subscribers: Vec<Subscriber>,
@@ -432,7 +432,7 @@ mod tests {
         let (queue, rx) = mpsc::channel(size);
         (
             Subscriber {
-                queue,
+                queue: queue.into(),
                 active: true,
                 cancel: None,
             },
@@ -562,7 +562,7 @@ mod regression {
                 .ok()
                 .unwrap();
             let subscriber = Subscriber {
-                queue,
+                queue: queue.into(),
                 active: true,
                 cancel: Some(cancel),
             };
@@ -624,7 +624,7 @@ mod regression {
             let origin = fixture.open(if partial { 512 } else { 0 }).unwrap();
             let (queue, mut receiver) = mpsc::channel(1);
             let sub = Subscriber {
-                queue,
+                queue: queue.into(),
                 active: true,
                 cancel: None,
             };
@@ -768,7 +768,7 @@ mod regression {
             for _ in 0..recipients {
                 let (queue, receiver) = mpsc::channel(1);
                 subscribers.push(Subscriber {
-                    queue,
+                    queue: queue.into(),
                     active: true,
                     cancel: None,
                 });
@@ -840,7 +840,7 @@ mod regression {
             for i in 0..3 {
                 let (queue, reader) = mpsc::channel(1);
                 subscribers.push(Subscriber {
-                    queue,
+                    queue: queue.into(),
                     active: i != 1,
                     cancel: None,
                 });
@@ -911,7 +911,7 @@ mod regression {
         for i in 0..3 {
             let (queue, reader) = mpsc::channel(1);
             subscribers.push(Subscriber {
-                queue,
+                queue: queue.into(),
                 active: i != 1,
                 cancel: None,
             });

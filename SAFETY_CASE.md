@@ -354,3 +354,50 @@ live slot from a final release before publication, and do not prove RSS residenc
 The observability probe measures grant traversal, pages, busy teardown and mixed
 admission separately; its bounded channel and clocks are measurement overhead.
 Local smoke is a harness check, not production throughput or tail-latency evidence.
+
+
+## Measurement integrity (AP-05/07/09, SI-04/06/08, IO-01/02)
+
+Measurement validation is independent of allocator accounting. The shared Python
+oracle in `scripts/performance_support.py` checks stage conservation, histogram
+overflow, delivery validity and confirmed teardown using explicit exceptions;
+`PerformanceContracts` exercises negative controls under ordinary and optimized
+Python. Failed or incomplete records remain sticky across resume.
+
+`abps_scripted_consumer_corruption_identity_and_skip_gaps` and
+`abps_scripted_consumer_partial_reads_and_terminal_outcomes` exercise the actual
+consumer with altered payload/header bytes, legal skipped IDs, short reads, EOF,
+reset and cancellation. The deterministic payload has independent golden vectors.
+`PerformanceProcessContracts` repeats corruption through a real TCP relay and
+checks nonzero exit plus retained JSON, actual issuer/returner affinity and pure
+resource-plan preflight. These are detector tests, not a proof of transport delivery.
+
+`ap09_queue_profiles_match_exact_envelopes_and_reject_deficits` checks the exact
+resource bounds and one-slot/one-byte deficits. Mixed diagnostics record setup,
+admission and drain separately and never read remote local-family counters.
+No allocator synchronization, layout or unsafe transition changes are involved.
+See the [harness guide](docs/performance-harness.md) for limitations and commands.
+
+### Fixed-arena local queue (AP-10)
+
+The private example adapter in `network/local_queue.rs` forbids unsafe code and
+uses prepared `Rc<RefCell<_>>` storage. Its handles cannot cross threads. A queue
+credit covers reservation, queued ownership, transfer and synchronous release;
+only transfer into the bounded writer batch or completed payload Drop refunds it.
+No borrow spans await, payload Drop or wake. Eviction can affect only the oldest
+queued entry; it cannot revoke another subscriber's view or an in-flight write.
+The `Right` guard restores reserved/transferring/releasing credits on unwind.
+
+`local-queue-conservation` in the verification registry selects `ap10_` scenarios:
+an independent survivor-history oracle; threshold/FIFO boundaries; wake and close
+with outstanding permits; unwind; real Mosaic refund before replacement; admission
+failure, truncated input and cancellation; partial writes, expiry and writer errors.
+The allocation probe includes the first prepared enqueue/evict/dequeue/wake cycle
+and an out-of-region positive control. It does not claim that Tokio task/runtime
+setup or socket I/O never allocates. Native histories use 1000 steps per configured
+queue/policy; Miri uses 64 per configuration to keep interpretation bounded.
+
+These transitions introduce no allocator atomic or unsafe changes. They are local
+ownership tests, not a new Loom proof. Core Loom evidence retains its existing
+scope. The fixed-arena profile deliberately reports envelope deficits rather than
+claiming availability. See [delivery profiles](docs/fixed-arena-delivery.md).

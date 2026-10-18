@@ -4,7 +4,7 @@ use super::{
     backend::{Fixture, Frame, Origin},
     pin_worker,
 };
-use crate::perf_support::{Args, Result, metrics::Latency};
+use crate::perf_support::{Args, Result, metrics::Latency, payload};
 use abps_reference::{
     self as reference, CapacityPolicy, ClassConfig, ClassReservation, Config, Error,
 };
@@ -21,6 +21,14 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 
 mod ingress;
+mod local_queue;
+#[cfg(feature = "mosaic-spike")]
+pub fn local_queue_allocation_probe(
+    allocator: &stats_alloc::StatsAlloc<std::alloc::System>,
+    iterations: usize,
+) -> Result<Value> {
+    local_queue::allocation_probe(allocator, iterations)
+}
 mod plan;
 #[cfg(test)]
 mod scripted_io;
@@ -37,6 +45,8 @@ struct Settings {
     fanout: usize,
     queue: usize,
     write_batch: usize,
+    local_queue: bool,
+    freshness_min_age: Option<Duration>,
     read_buf: bool,
     capacity_policy: CapacityPolicy,
     class_slots: Vec<usize>,
@@ -198,6 +208,36 @@ impl Settings {
             "skip" => true,
             _ => return Err("invalid overflow policy".into()),
         };
+        let local_queue = match args.get("queue-backend", "tokio") {
+            "tokio" => false,
+            "local" => true,
+            _ => return Err("invalid queue-backend".into()),
+        };
+        let freshness = match args.get("freshness-priority", "off") {
+            "off" => false,
+            "oldest" => true,
+            _ => return Err("invalid freshness-priority".into()),
+        };
+        let min_age = args
+            .0
+            .get("freshness-min-age-ms")
+            .map(|v| v.parse::<u64>())
+            .transpose()?;
+        if min_age.is_some_and(|n| n > 3_600_000) || (!freshness && min_age.is_some()) {
+            return Err("freshness-min-age-ms requires oldest and must be 0..3600000".into());
+        }
+        if local_queue
+            && (remote
+                || args.get("backend", "berry") != "mosaic"
+                || local_branches
+                || worker_branches)
+        {
+            return Err("local queue requires mosaic, return=local and scalar/batch fanout".into());
+        }
+        if freshness && (!local_queue || !skip) {
+            return Err("oldest requires queue-backend=local and overflow=skip".into());
+        }
+        let freshness_min_age = freshness.then(|| Duration::from_millis(min_age.unwrap_or(0)));
         let setup_ms = args.n("setup-timeout-ms", 30_000);
         let drain_ms = args.n("drain-timeout-ms", 2_000);
         if !(1..=300_000).contains(&setup_ms) || !(1..=300_000).contains(&drain_ms) {
@@ -217,6 +257,8 @@ impl Settings {
             fanout,
             queue,
             write_batch,
+            local_queue,
+            freshness_min_age,
             read_buf,
             capacity_policy,
             class_slots,
@@ -404,7 +446,7 @@ impl Message {
     }
 }
 struct Subscriber {
-    queue: mpsc::Sender<Message>,
+    queue: local_queue::IngressSender,
     active: bool,
     cancel: Option<oneshot::Sender<()>>,
 }
@@ -529,6 +571,8 @@ struct Consumer {
     timely_bytes: u64,
     invalid: u64,
     cancelled: bool,
+    terminal: &'static str,
+    partial_bytes: usize,
     latency: Latency,
 }
 impl Consumer {
@@ -542,54 +586,132 @@ impl Consumer {
             timely_bytes: 0,
             invalid: 0,
             cancelled: false,
+            terminal: "reading",
+            partial_bytes: 0,
             latency: Latency::default(),
         }
     }
     fn json(&self) -> Value {
         json!({"stream":self.stream,"subscriber":self.subscriber,"delivered":self.delivered,
-        "bytes":self.bytes,"overdue":self.overdue,"invalid":self.invalid,"cancelled":self.cancelled,
+        "bytes":self.bytes,"overdue":self.overdue,"invalid":self.invalid,"cancelled":self.cancelled,"terminal":self.terminal,"partial_bytes":self.partial_bytes,
         "timely_delivered":self.delivered-self.overdue,"expired_delivered":self.overdue,"timely_bytes":self.timely_bytes,
         "scheduled_arrival_latency":self.latency.json()})
     }
 }
+#[derive(Clone)]
+struct Validation {
+    settings: Settings,
+    rate: u64,
+    planned: u64,
+    skew: bool,
+}
+impl Validation {
+    fn header_error(
+        &self,
+        header: Header,
+        stream: usize,
+        previous: Option<u64>,
+    ) -> Option<&'static str> {
+        if header.len == 0 || header.len > self.settings.max_payload() {
+            return Some("invalid_length");
+        }
+        if header.id >= self.planned
+            || loadgen::route(header.id, self.settings.streams, self.skew) != stream
+        {
+            return Some("invalid_identity");
+        }
+        if previous.is_some_and(|id| header.id <= id) {
+            return Some("invalid_order");
+        }
+        if header.due
+            != Duration::from_secs_f64(header.id as f64 / self.rate as f64).as_nanos() as u64
+        {
+            return Some("invalid_timestamp");
+        }
+        let sequence =
+            loadgen::sequence_before(header.id, stream, self.settings.streams, self.skew);
+        if header.len != self.settings.payload_size(stream, sequence) {
+            return Some("invalid_length");
+        }
+        None
+    }
+}
+
 async fn consume(
-    mut socket: TcpStream,
+    mut socket: impl tokio::io::AsyncRead + Unpin,
     mut stats: Consumer,
     start: Instant,
     deadline: tokio::time::Instant,
-    max: usize,
+    mut buffer: Vec<u8>,
     slow: Duration,
-    max_age: Option<Duration>,
+    validation: Validation,
 ) -> Consumer {
-    let mut payload = vec![0; max];
     let mut previous = None;
     loop {
-        let frame = async {
-            let header = Header::read(&mut socket).await?;
-            if header.len == 0 || header.len > max {
-                return Err(std::io::ErrorKind::InvalidData.into());
-            }
-            socket.read_exact(&mut payload[..header.len]).await?;
-            Ok::<_, std::io::Error>(header)
-        };
-        let header = match tokio::time::timeout_at(deadline, frame).await {
-            Ok(Ok(header)) => header,
-            Ok(Err(error)) => {
-                if error.kind() == std::io::ErrorKind::InvalidData {
-                    stats.invalid += 1;
-                }
+        let mut bytes = [0; HEADER];
+        let mut prefix = 0;
+        let read = payload::read_prefix(&mut socket, &mut bytes, &mut prefix);
+        match tokio::time::timeout_at(deadline, read).await {
+            Ok(Ok(true)) => (),
+            result => {
+                stats.partial_bytes = prefix;
+                stats.terminal = match result {
+                    Ok(Ok(false)) if prefix == 0 => "clean_eof",
+                    Ok(Ok(false)) => "truncated_header",
+                    Ok(Err(ref e)) if e.kind() == std::io::ErrorKind::ConnectionReset => {
+                        "connection_reset"
+                    }
+                    Ok(Err(_)) => "read_error",
+                    Err(_) => {
+                        stats.cancelled = true;
+                        "read_deadline"
+                    }
+                    _ => unreachable!(),
+                };
                 break;
             }
-            Err(_) => {
-                stats.cancelled = true;
+        }
+        let header = Header {
+            len: u32::from_be_bytes(bytes[..4].try_into().unwrap()) as usize,
+            id: u64::from_be_bytes(bytes[4..12].try_into().unwrap()),
+            due: u64::from_be_bytes(bytes[12..].try_into().unwrap()),
+        };
+        if let Some(reason) = validation.header_error(header, stats.stream, previous) {
+            stats.invalid += 1;
+            stats.terminal = reason;
+            break;
+        }
+        prefix = 0;
+        let read = payload::read_prefix(&mut socket, &mut buffer[..header.len], &mut prefix);
+        match tokio::time::timeout_at(deadline, read).await {
+            Ok(Ok(true)) => (),
+            result => {
+                stats.partial_bytes = prefix;
+                stats.terminal = match result {
+                    Ok(Ok(false)) => "truncated_payload",
+                    Ok(Err(ref e)) if e.kind() == std::io::ErrorKind::ConnectionReset => {
+                        "connection_reset"
+                    }
+                    Ok(Err(_)) => "read_error",
+                    Err(_) => {
+                        stats.cancelled = true;
+                        "read_deadline"
+                    }
+                    _ => unreachable!(),
+                };
                 break;
             }
-        };
-        if previous.is_some_and(|id| header.id <= id)
-            || payload[0] != 0x5a
-            || payload[header.len - 1] != 0x5a
+        }
+        if payload::validate_payload(
+            &buffer[..header.len],
+            validation.settings.seed,
+            stats.stream,
+            header.id,
+        )
+        .is_err()
         {
             stats.invalid += 1;
+            stats.terminal = "invalid_payload";
             break;
         }
         previous = Some(header.id);
@@ -598,7 +720,10 @@ async fn consume(
             .saturating_sub(Duration::from_nanos(header.due));
         stats.delivered += 1;
         stats.bytes += header.len as u64;
-        let expired = max_age.is_some_and(|age| latency >= age);
+        let expired = validation
+            .settings
+            .max_frame_age
+            .is_some_and(|age| latency >= age);
         stats.overdue += u64::from(expired);
         if !expired {
             stats.timely_bytes += header.len as u64;
@@ -610,16 +735,28 @@ async fn consume(
                 .is_err()
         {
             stats.cancelled = true;
+            stats.terminal = "cancelled_after_delivery";
             break;
         }
     }
-    stats // includes completed slow samples when read/sleep is cancelled
+    stats // preserve complete samples and the terminal partial-frame observation
+}
+
+/// SI-08: planning allocates only the model; no sockets, runtime, or arena.
+pub fn resource_plan(args: &Args) -> Result<Value> {
+    let settings = Settings::new(args)?;
+    let shared = args.get("roots", "separate") == "shared";
+    let plan = plan::PipelinePlan::new(&settings, shared, args.get("backend", "berry"))?;
+    Ok(json!({"role":"plan", "pipeline_plan":plan.json()}))
 }
 
 mod loadgen;
 pub fn loadgen(args: &Args) -> Result<Value> {
     loadgen::run(args)
 }
+
+#[cfg(test)]
+mod consumer_tests;
 
 #[cfg(test)]
 mod tests {
@@ -664,26 +801,30 @@ mod tests {
             .await
             .unwrap();
         let (mut sender, _) = listener.accept().await.unwrap();
-        write_frame(
-            &mut sender,
-            Header {
-                len: 4,
-                id: 1,
-                due: 0,
-            },
-            &[0x5a; 4],
-        )
-        .await
-        .unwrap();
+        let settings = Settings::new(&Args(std::collections::BTreeMap::new())).unwrap();
+        let len = settings.payload_size(0, 0);
+        let mut data = vec![0; len];
+        payload::fill_payload(&mut data, settings.seed, 0, 0);
+        write_frame(&mut sender, Header { len, id: 0, due: 0 }, &data)
+            .await
+            .unwrap();
         sender.shutdown().await.unwrap();
         let result = consume(
             socket,
             Consumer::new(0, 0),
             Instant::now() - Duration::from_millis(200),
             tokio::time::Instant::now() + Duration::from_secs(1),
-            4,
+            vec![0; settings.max_payload()],
             Duration::ZERO,
-            Some(Duration::from_millis(100)),
+            Validation {
+                settings: Settings {
+                    max_frame_age: Some(Duration::from_millis(100)),
+                    ..settings
+                },
+                rate: 1,
+                planned: 1,
+                skew: false,
+            },
         )
         .await;
         assert_eq!(
@@ -693,7 +834,7 @@ mod tests {
                 result.timely_bytes,
                 result.bytes
             ),
-            (1, 1, 0, 4)
+            (1, 1, 0, len as u64)
         );
         assert_eq!(result.latency.json()["samples"], 1);
         assert_eq!(result.invalid, 0);
@@ -706,30 +847,27 @@ mod tests {
             .await
             .unwrap();
         let (mut sender, _) = listener.accept().await.unwrap();
+        let settings = Settings::new(&Args(std::collections::BTreeMap::new())).unwrap();
+        let len = settings.payload_size(0, 0);
+        let next_len = settings.payload_size(0, 1);
+        let mut data = vec![0; len];
+        payload::fill_payload(&mut data, settings.seed, 0, 0);
         let writer = tokio::spawn(async move {
-            write_frame(
-                &mut sender,
-                Header {
-                    len: 16,
-                    id: 1,
-                    due: 0,
-                },
-                &[0x5a; 16],
-            )
-            .await
-            .unwrap();
+            write_frame(&mut sender, Header { len, id: 0, due: 0 }, &data)
+                .await
+                .unwrap();
             sender
                 .write_all(
                     &Header {
-                        len: 16,
-                        id: 2,
-                        due: 0,
+                        len: next_len,
+                        id: 1,
+                        due: 1_000_000,
                     }
                     .encode(),
                 )
                 .await
                 .unwrap();
-            sender.write_all(&[0x5a; 4]).await.unwrap();
+            sender.write_all(&[0; 4]).await.unwrap();
             std::future::pending::<()>().await;
         });
         let result = consume(
@@ -737,9 +875,14 @@ mod tests {
             Consumer::new(0, 0),
             Instant::now(),
             tokio::time::Instant::now() + Duration::from_millis(100),
-            16,
+            vec![0; settings.max_payload()],
             Duration::ZERO,
-            Some(Duration::from_millis(100)),
+            Validation {
+                settings,
+                rate: 1000,
+                planned: 2,
+                skew: false,
+            },
         )
         .await;
         writer.abort();

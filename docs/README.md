@@ -15,6 +15,8 @@ and invariant IDs retain their exact spelling.
 | Which backend fits an experiment? | [Reference](reference-spike.md), [Berry](berry-spike.md), [Mosaic](mosaic-spike.md) |
 | How do local families and queues retain memory? | [Local branches](local-branches.md), [accounting and worker fan-out](accounting-fanout-hardening.md) |
 | How do domains, shutdown and replacement work? | [Lifecycle and preparation](lifecycle-and-preparation.md) |
+| How are performance results validated? | [Current measurement harness](performance-harness.md) |
+| How can delivery improve at fixed arena capacity? | [Fixed-arena delivery profiles](fixed-arena-delivery.md) |
 | How are claims tested? | [Verification guide](verification.md), [registry](../verification/matrix.json), [unsafe inventory](../verification/unsafe-sites.json) |
 
 CONTRIBUTING defines semantics. Guides explain those semantics and cite their IDs.
@@ -25,6 +27,9 @@ Current guides remain directly under `docs/`.
 
 The [integration check](reports/2026-10-11/upstream-integration.md) records the documentation
 and selected API validation performed against this upstream revision.
+
+The [performance harness correction](reports/2026-10-18/performance-review.md)
+records the later local implementation checks and repeat measurements.
 
 ## Architecture and measurement history
 

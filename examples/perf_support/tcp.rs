@@ -2,6 +2,7 @@
 //! implicit application retry after the three explicit Contended attempts.
 use super::backend::{Fixture, Frame, Lease, Origin};
 use super::metrics::{Counts, Latency};
+use super::payload;
 use super::{AnyError, Args, Result};
 use abps_reference::{ClassConfig, Error};
 use serde_json::{Value, json};
@@ -33,12 +34,14 @@ struct ReaderStats {
     overdue: u64,
     latency: Latency,
     cancelled: bool,
+    invalid: u64,
+    terminal: &'static str,
 }
 impl ReaderStats {
     fn json(&self) -> Value {
         json!({"delivered": self.delivered, "bytes": self.bytes,
             "overdue_100ms": self.overdue, "scheduled_arrival_latency": self.latency.json(),
-            "cancelled_after_drain_deadline": self.cancelled})
+            "cancelled_after_drain_deadline": self.cancelled,"invalid":self.invalid,"terminal":self.terminal})
     }
 }
 async fn pair() -> std::io::Result<(TcpStream, TcpStream)> {
@@ -108,28 +111,67 @@ async fn consume(
         overdue: 0,
         latency: Latency::default(),
         cancelled: false,
+        invalid: 0,
+        terminal: "clean_eof",
     };
     let mut previous = None;
     let _ = ready.send(());
     let read_loop = async {
-        while let Some((len, id, due_ns)) = header(&mut socket).await? {
-            if len == 0 || len > max_size {
-                return Err("invalid frame length".into());
-            }
-            if previous.is_some_and(|prev| id <= prev) {
-                return Err("reordered frame".into());
-            }
-            if let Err(e) = socket.read_exact(&mut payload[..len]).await {
-                if matches!(
-                    e.kind(),
-                    std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::ConnectionReset
-                ) {
+        loop {
+            let mut bytes = [0; HEADER];
+            let mut prefix = 0;
+            match payload::read_prefix(&mut socket, &mut bytes, &mut prefix).await {
+                Ok(true) => (),
+                Ok(false) => {
+                    stats.terminal = if prefix == 0 {
+                        "clean_eof"
+                    } else {
+                        "truncated_header"
+                    };
                     break;
                 }
-                return Err(e.into());
+                Err(e) => {
+                    stats.terminal = if e.kind() == std::io::ErrorKind::ConnectionReset {
+                        "connection_reset"
+                    } else {
+                        "read_error"
+                    };
+                    break;
+                }
             }
-            if payload[0] != 0x5a || payload[len - 1] != 0x5a {
-                return Err("payload corrupted".into());
+            let len = u32::from_be_bytes(bytes[..4].try_into().unwrap()) as usize;
+            let id = u64::from_be_bytes(bytes[4..12].try_into().unwrap());
+            let due_ns = u64::from_be_bytes(bytes[12..].try_into().unwrap());
+            if len == 0 || len > max_size {
+                stats.invalid += 1;
+                stats.terminal = "invalid_length";
+                break;
+            }
+            if previous.is_some_and(|prev| id <= prev) {
+                stats.invalid += 1;
+                stats.terminal = "invalid_order";
+                break;
+            }
+            prefix = 0;
+            match payload::read_prefix(&mut socket, &mut payload[..len], &mut prefix).await {
+                Ok(true) => (),
+                Ok(false) => {
+                    stats.terminal = "truncated_payload";
+                    break;
+                }
+                Err(e) => {
+                    stats.terminal = if e.kind() == std::io::ErrorKind::ConnectionReset {
+                        "connection_reset"
+                    } else {
+                        "read_error"
+                    };
+                    break;
+                }
+            }
+            if payload::validate_payload(&payload[..len], 0, 0, id).is_err() {
+                stats.invalid += 1;
+                stats.terminal = "invalid_payload";
+                break;
             }
             previous = Some(id);
             let latency =
@@ -152,6 +194,9 @@ async fn consume(
     // Cancelling a slow reader must preserve its completed samples, including
     // the worst queueing delays. Partial frames are never counted as delivered.
     stats.cancelled = cancelled;
+    if cancelled {
+        stats.terminal = "cancelled";
+    }
     Ok(stats)
 }
 
@@ -162,7 +207,7 @@ mod tests {
     async fn cancellation_keeps_completed_slow_consumer_samples() -> Result<()> {
         let mut wire = vec![0; HEADER + 16];
         wire[..4].copy_from_slice(&16u32.to_be_bytes());
-        wire[HEADER..].fill(0x5a);
+        payload::fill_payload(&mut wire[HEADER..], 0, 0, 0);
         let (ready_tx, _ready_rx) = oneshot::channel();
         let (stop_tx, stop_rx) = oneshot::channel();
         let mut reader = Box::pin(consume(
@@ -318,7 +363,7 @@ pub async fn run(args: &Args, mut phase: impl FnMut(&str)) -> Result<Value> {
             stop_reader,
         });
     }
-    let payload = vec![0x5a; max];
+    let mut payload = vec![0; max];
     let duration = args.seconds("seconds", 10.0);
     let planned = (duration.as_secs_f64() * rate as f64).floor() as u64;
     let end = start + duration;
@@ -369,6 +414,7 @@ pub async fn run(args: &Args, mut phase: impl FnMut(&str)) -> Result<Value> {
             }
             attempted += 1;
             let size = size_for(id, frames);
+            payload::fill_payload(&mut payload[..size], 0, 0, id);
             let send = write_frame(&mut source_socket, id, due_ns, &payload[..size]);
             match tokio::time::timeout_at(tokio::time::Instant::from_std(end), send).await {
                 Ok(Ok(())) => sent += 1,
@@ -515,6 +561,8 @@ pub async fn run(args: &Args, mut phase: impl FnMut(&str)) -> Result<Value> {
         overdue: 0,
         latency: Latency::default(),
         cancelled: false,
+        invalid: 0,
+        terminal: "clean_eof",
     };
     let mut drain_cancelled = 0;
     let mut writer_errors = Vec::new();
@@ -542,6 +590,7 @@ pub async fn run(args: &Args, mut phase: impl FnMut(&str)) -> Result<Value> {
                 subscriber.reader.await??
             }
         };
+        total.invalid += reader.invalid;
         total.delivered += reader.delivered;
         total.bytes += reader.bytes;
         total.overdue += reader.overdue;
@@ -556,6 +605,7 @@ pub async fn run(args: &Args, mut phase: impl FnMut(&str)) -> Result<Value> {
     let source = json!({"planned": source.0, "attempted": source.1, "sent": source.2,
         "missed_arrivals": source.3, "not_attempted_after_stop": source.4, "stop": source.5});
     Ok(json!({
+        "failed":total.invalid!=0,"payload_pattern":payload::VERSION,
         "source": source, "accepted": accepted, "ingress_bytes": ingress_bytes,
         "accepted_per_planned_s": accepted as f64 / duration.as_secs_f64(),
         "ingress_elapsed_s": ingress_elapsed.as_secs_f64(), "planned_seconds": duration.as_secs_f64(),

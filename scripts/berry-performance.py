@@ -37,54 +37,11 @@ def command_output(*command):
     return subprocess.run(command, text=True, capture_output=True, check=False).stdout.strip()
 
 
-def flow(server, client):
-    source = client["source"]
-    assert source["planned"] == source["attempted"] + source["missed_arrivals"]
-    assert source["attempted"] == source["enqueued"] + source["queue_full"] + source["queue_closed"]
-    assert source["enqueued"] == source["sent"] + source["failed_writes"]
-    streams = [s for w in server["workers"] for s in w["streams"]]
-    received = sum(s["received"] for s in streams)
-    discarded = sum(s.get("discarded", s["received"] - s["accepted"]) for s in streams)
-    accepted = sum(s["accepted"] for s in streams)
-    assert received == accepted + discarded
-    enqueued = sum(s["enqueued"] for s in streams)
-    assert accepted <= source["sent"]
-    cancelled_before_forward = sum(s.get("cancelled_before_forward", 0) for s in streams)
-    for s in streams:
-        assert s.get("dispatched_recipient_rights", 0) == s.get("locally_enqueued", 0) + s.get("cancelled_before_forward", 0)
-        if "contention_by_operation" in s:
-            assert s["contended"] == sum(s["contention_by_operation"].values())
-    assert received * server["fanout"] == sum(
-        s["enqueued"] + s.get("cancelled_before_forward", 0) + s["skipped"] + s["queue_rejected"] +
-        s["no_subscriber_deliveries"] + s.get("ingress_rejected_deliveries", 0) for s in streams)
-    delivered = sum(c["delivered"] for c in client["consumers"])
-    assert delivered == client["total"]["delivered"]
-    assert delivered == client["total"]["scheduled_arrival_latency"]["samples"]
-    timely = sum(c.get("timely_delivered", c["delivered"]) for c in client["consumers"])
-    expired = sum(c.get("expired_delivered", 0) for c in client["consumers"])
-    assert timely + expired == delivered
-    assert timely == client["total"].get("timely_delivered", delivered)
-    assert expired == client["total"].get("expired_delivered", 0)
-    written = sum(w["writer_completed"] for w in server["workers"])
-    assert delivered <= written <= enqueued
-    for worker in server["workers"]:
-        if worker["drained"]:
-            d = worker["drained"]
-            assert d["admitted"] == 0 and d["available"] == d["total_slots"]
-    planned_deliveries = source["planned"] * server["fanout"]
-    return {"received": received, "discarded": discarded, "accepted": accepted, "enqueued": enqueued, "writer_completed": written,
-            "delivered": delivered, "undelivered_enqueued": enqueued - delivered,
-            "cancelled_before_forward": cancelled_before_forward,
-            "write_api_calls": sum(w["write_api_calls"] for w in server["workers"]),
-            "frames_per_write": written / max(1, sum(w["write_api_calls"] for w in server["workers"])),
-            "queue_credit_attempts": sum(s.get("queue_credit_attempts", 0) for s in streams),
-            "planned_deliveries": planned_deliveries,
-            "delivery_fraction": delivered / max(1, planned_deliveries),
-            "timely_delivered": timely, "expired_delivered": expired,
-            "timely_delivery_fraction": timely / max(1, planned_deliveries),
-            "network_bytes_per_s": client["total"]["bytes"] / client["measurement_seconds"],
-            "useful_bytes_per_s": client["total"].get("timely_bytes", client["total"]["bytes"]) /
-                client["measurement_seconds"]}
+# Kept as an import alias for existing callers.
+from performance_support import (
+    SCHEMA, read_records, require, validate_issuer_flow as flow,
+    cpu_selection, physical_cpus, validate_probe_envelope,
+)
 
 
 class Runner:
@@ -97,13 +54,16 @@ class Runner:
         self.output = options.output
         self.output.mkdir(parents=True, exist_ok=True)
         self.bin = options.target / "release/examples"
-        sources = [ROOT / "Cargo.toml", ROOT / "Cargo.lock", *sorted((ROOT / "scripts").glob("*.py")),
+        sources = [ROOT / "Cargo.toml", ROOT / "Cargo.lock", ROOT / "build.rs", *sorted((ROOT / "scripts").glob("*.py")),
                    *sorted((ROOT / "src").rglob("*.rs")),
                    *sorted((ROOT / "examples").rglob("*.rs"))]
         identity = {str(p.relative_to(ROOT)): digest(p) for p in sources}
         identity.update({name: digest(self.bin / name) for name in ("spike_probe", "spike_alloc")})
         if options.server_binary:
             identity["server_binary_override"] = digest(options.server_binary)
+        for role in ("build_record", "server_build_record"):
+            record_path = getattr(options, role, None)
+            identity[role] = digest(record_path) if record_path else None
         path = self.output / "environment.json"
         if path.exists():
             saved = json.loads(path.read_text())
@@ -125,17 +85,26 @@ class Runner:
                 "build": "prebuilt binaries; compiler flags are unknown unless a build record is supplied",
                 "caller_rustflags": os.environ.get("RUSTFLAGS"),
                 "build_record": json.loads(options.build_record.read_text()) if getattr(options, "build_record", None) else None,
+                "server_build_record": json.loads(options.server_build_record.read_text()) if getattr(options, "server_build_record", None) else None,
+                "affinity_kind": "SMT/logical" if getattr(options, "smt", False) else "one CPU per physical core",
                 "server_binary_override": str(options.server_binary) if options.server_binary else None,
                 "note": "affinity does not isolate a shared VM or remove SMT interference",
             }, indent=2) + "\n")
         self.raw = self.output / "results.jsonl"
-        self.done = {r["id"]: r for r in map(json.loads, self.raw.read_text().splitlines())} if self.raw.exists() else {}
+        self.done = read_records(self.raw)
+        self.identity = identity
 
     def save(self, key, record):
+        record.setdefault("schema_version", SCHEMA)
+        record.setdefault("status", "incomplete")
+        record.setdefault("errors", [])
+        record.setdefault("source_and_binary_identity", self.identity)
+        record.setdefault("scope", "exploratory; dedicated-host performance not validated")
         record.update(id=key, utc=datetime.datetime.now(datetime.timezone.utc).isoformat())
         with self.raw.open("a") as output:
             output.write(json.dumps(record) + "\n")
-        self.done[key] = record
+        if record["status"] == "passed":
+            self.done[key] = record
         brief = record.get("flow", record.get("result", {}).get("metrics", {}))
         print(f"{key}: " + json.dumps({k: v for k, v in brief.items()
             if k in ("accepted_per_s", "delivery_fraction", "delivered", "errors")}), flush=True)
@@ -188,30 +157,51 @@ class Runner:
 
     def run(self, name, args, trial=0, alloc=False):
         key = f"{name}-{trial}"
-        affinity = self.options.micro_cpus[:int(args.get("threads", 1))]
+        threads = int(args.get("threads", 1))
+        affinity = self.options.micro_cpus[:threads]
         opts = dict(args, cpus=",".join(map(str, affinity)))
+        normalized = {k: str(v) for k, v in opts.items()}
         if key in self.done:
-            if self.done[key]["args"] != {k: str(v) for k, v in opts.items()}:
-                raise RuntimeError(f"{key}: configuration changed; use a new output directory")
+            require(self.done[key]["args"] == normalized, key, "configuration changed; use a new output directory")
             return self.done[key]
+        physical_ok = bool(affinity) and (getattr(self.options,"smt",False) or len(physical_cpus(affinity)) == len(affinity))
+        if len(affinity) < threads or not physical_ok:
+            return self.save(key, dict(args=normalized, status="unvalidated", reason="insufficient distinct CPUs"))
         command = ["taskset", "-c", opts["cpus"], str(self.bin / ("spike_alloc" if alloc else "spike_probe"))]
         command += [f"--{k}={v}" for k, v in opts.items()]
         out = self.output / f"{key}.json"
-        with out.open("w") as stdout, (self.output / f"{key}.stderr").open("w") as stderr:
-            process = subprocess.Popen(command, stdout=stdout, stderr=stderr, cwd=ROOT, start_new_session=True)
-            samples = self.wait([process], float(args.get("seconds", 1)) + float(args.get("warmup", .2)) + 30)[0]
-        result = json.loads(out.read_text())
-        return self.save(key, {**result, "command": command, "instrumented_alloc": alloc,
-            "rss_samples": samples, "rss_peak_kib": max((s[1] for s in samples), default=0)})
+        record = dict(args=normalized, command=command, instrumented_alloc=alloc, status="incomplete")
+        process = None
+        try:
+            with out.open("w") as stdout, (self.output / f"{key}.stderr").open("w") as stderr:
+                process = subprocess.Popen(command, stdout=stdout, stderr=stderr, cwd=ROOT, start_new_session=True)
+                samples = self.wait([process], float(args.get("seconds", 1)) + float(args.get("warmup", .2)) + 30)[0]
+            result = json.loads(out.read_text())
+            record.update(result)
+            validate_probe_envelope(result, normalized)
+            record.update(status="passed", rss_samples=samples, rss_peak_kib=max((s[1] for s in samples), default=0))
+        except Exception as error:
+            record.update(status="incomplete" if isinstance(error, TimeoutError) else "failed", errors=[str(error)])
+            raise
+        finally:
+            record["exit_codes"] = [process.returncode if process else None]
+            self.save(key, record)
+        return record
 
     def tcp(self, name, args, trial=0):
         key = f"{name}-{trial}"
         if key in self.done:
-            if self.done[key]["args"] != args:
-                raise RuntimeError(f"{key}: configuration changed; use a new output directory")
+            require(self.done[key]["args"] == args, key, "configuration changed; use a new output directory")
             return self.done[key]
-        server_args = dict(args, case="tcp", role="server", cpus=",".join(map(str, self.options.server_cpus)))
-        server_cmd = ["taskset", "-c", server_args["cpus"], str(self.options.server_binary or (self.bin / "spike_probe"))]
+        needed = int(args.get("threads", 1)) * (2 if args.get("return", "local") == "remote" else 1)
+        groups = [self.options.server_cpus, self.options.generator_cpus, self.options.reader_cpus]
+        selected = [cpu for group in groups for cpu in group]
+        physical_ok = bool(selected) and (getattr(self.options,"smt",False) or len(physical_cpus(selected)) == len(selected))
+        if len(groups[0]) < needed or not all(groups) or not physical_ok or any(set(groups[i]) & set(groups[j]) for i in range(3) for j in range(i)):
+            return self.save(key, dict(args=args, status="unvalidated", reason="insufficient disjoint server/generator/reader CPUs"))
+        server_binary = self.options.server_binary or (self.bin / "spike_probe")
+        server_args = dict(args, case="tcp", role="server", cpus=",".join(map(str, groups[0])))
+        server_cmd = ["taskset", "-c", server_args["cpus"], str(server_binary)]
         server_cmd += [f"--{k}={v}" for k, v in server_args.items()]
         prefix = self.options.server_prefix
         if prefix:
@@ -219,50 +209,79 @@ class Runner:
             server_cmd = [part.replace("{output}", str(self.output / key)) for part in shlex.split(prefix)] + server_cmd
         server_log = self.output / f"{key}.server.jsonl"
         client_log = self.output / f"{key}.loadgen.json"
-        with (self.output / f"{key}.server.stderr").open("w") as se, \
-             (self.output / f"{key}.loadgen.stderr").open("w") as ce, client_log.open("w") as co:
-            server = subprocess.Popen(server_cmd, stdout=subprocess.PIPE, stderr=se, text=True,
-                                      cwd=ROOT, start_new_session=True)
-            client = None
-            try:
-                with selectors.DefaultSelector() as selector:
-                    selector.register(server.stdout, selectors.EVENT_READ)
-                    if not selector.select(30):
-                        raise TimeoutError("server readiness timed out")
-                first = server.stdout.readline()
-                ready = json.loads(first)
-                generator_args = dict(args, case="tcp", role="loadgen", ports=",".join(map(str, ready["ports"])),
-                    **{"generator-cpus": ",".join(map(str, self.options.generator_cpus)),
-                       "reader-cpus": ",".join(map(str, self.options.reader_cpus))})
-                client_cpus = sorted(set(self.options.generator_cpus + self.options.reader_cpus))
-                client_cmd = ["taskset", "-c", ",".join(map(str, client_cpus)), str(self.bin / "spike_probe")]
-                client_cmd += [f"--{k}={v}" for k, v in generator_args.items()]
-                client = subprocess.Popen(client_cmd, stdout=co, stderr=ce, cwd=ROOT, start_new_session=True)
-                # A full server report can exceed pipe capacity (many streams).
-                # Drain stdout concurrently; do not make server completion depend on its size.
-                import threading
-                tail = []
-                reader = threading.Thread(target=lambda: tail.append(server.stdout.read()))
-                reader.start()
-                samples = self.wait([server, client], float(args["seconds"]) + 40,
-                                    [ready["pid"], client.pid])
-                reader.join(timeout=5)
-                server_log.write_text(first + "".join(tail))
-            finally:
-                for process in (client, server):
-                    if process and process.poll() is None:
-                        self.kill(process)
-                    if process:
-                        process.wait()
-        sr = json.loads(server_log.read_text().splitlines()[-1])["result"]
-        cr = json.loads(client_log.read_text())["result"]
-        cr["measurement_seconds"] = float(args["seconds"])
-        conservation = flow(sr, cr)
-        return self.save(key, {"args": args, "commands": [server_cmd, client_cmd],
-            "profiled": bool(prefix), "server": sr, "loadgen": cr, "flow": conservation,
-            "server_rss_samples": samples[0], "loadgen_rss_samples": samples[1],
-            "server_rss_peak_kib": max(s[1] for s in samples[0]),
-            "loadgen_rss_peak_kib": max(s[1] for s in samples[1])})
+        record = dict(args=args, commands=[], profiled=bool(prefix), status="incomplete")
+        server = client = reader = None
+        samples = [[], []]
+        try:
+            # Only the server binary computes the canonical plan. This role must
+            # succeed before any socket/runtime/arena resources are started.
+            plan_cmd = [str(server_binary)] + [f"--{k}={v}" for k, v in dict(args, case="tcp", role="plan").items()]
+            record["commands"].append(plan_cmd)
+            plan_output = self.output / f"{key}.plan.stdout"
+            with plan_output.open("w") as po, (self.output / f"{key}.plan.stderr").open("w") as pe:
+                plan_run = subprocess.run(plan_cmd, cwd=ROOT, text=True, stdout=po, stderr=pe, timeout=30)
+            record["plan_exit_code"] = plan_run.returncode
+            plan_run.check_returncode()
+            expected_plan = validate_probe_envelope(json.loads(plan_output.read_text()), dict(args,case="tcp",role="plan"))["pipeline_plan"]
+            record["pipeline_plan"] = expected_plan
+            with (self.output / f"{key}.server.stderr").open("w") as se, \
+                 (self.output / f"{key}.loadgen.stderr").open("w") as ce, client_log.open("w") as co, server_log.open("w") as so:
+                record["commands"].append(server_cmd)
+                server = subprocess.Popen(server_cmd, stdout=subprocess.PIPE, stderr=se, text=True, cwd=ROOT, start_new_session=True)
+                try:
+                    with selectors.DefaultSelector() as selector:
+                        selector.register(server.stdout, selectors.EVENT_READ)
+                        if not selector.select(30):
+                            raise TimeoutError("server readiness timed out")
+                    first = server.stdout.readline()
+                    so.write(first); so.flush()
+                    # Persist every line even if readiness, a process, or validation fails.
+                    import threading
+                    def drain_stdout():
+                        for line in server.stdout:
+                            so.write(line); so.flush()
+                    reader = threading.Thread(target=drain_stdout)
+                    reader.start()
+                    ready = json.loads(first)
+                    generator_args = dict(args, case="tcp", role="loadgen", ports=",".join(map(str, ready["ports"])),
+                        **{"generator-cpus": ",".join(map(str, groups[1])), "reader-cpus": ",".join(map(str, groups[2]))})
+                    client_cmd = ["taskset", "-c", ",".join(map(str, sorted(set(groups[1] + groups[2])))), str(self.bin / "spike_probe")]
+                    client_cmd += [f"--{k}={v}" for k, v in generator_args.items()]
+                    record["commands"].append(client_cmd)
+                    client = subprocess.Popen(client_cmd, stdout=co, stderr=ce, cwd=ROOT, start_new_session=True)
+                    samples = self.wait([server, client], float(args["seconds"]) + 40, [ready["pid"], client.pid])
+                finally:
+                    for process in (client, server):
+                        if process and process.poll() is None:
+                            self.kill(process)
+                        if process:
+                            process.wait()
+                    if reader:
+                        reader.join(timeout=5)
+                        require(not reader.is_alive(), key, "server output reader did not finish")
+            sr = validate_probe_envelope(json.loads(server_log.read_text().splitlines()[-1]), server_args)
+            cr = validate_probe_envelope(json.loads(client_log.read_text()), generator_args)
+            cr["measurement_seconds"] = float(args["seconds"])
+            record.update(server=sr, loadgen=cr)
+            require(sr["pipeline_plan"] == expected_plan, key, "server plan differs from preflight")
+            record.update(flow=flow(sr, cr), status="passed")
+        except Exception as error:
+            record.update(status="incomplete" if isinstance(error, (TimeoutError, subprocess.TimeoutExpired)) else "failed", errors=[str(error)])
+            raise
+        finally:
+            # Retain partial reports even after nonzero process exits.
+            for path, name in [(server_log, "server"), (client_log, "loadgen")]:
+                if path.exists():
+                    try:
+                        record[name] = json.loads(path.read_text().splitlines()[-1])["result"]
+                    except (ValueError, KeyError, IndexError):
+                        pass
+            record.update(exit_codes=[p.returncode if p else None for p in (server, client)],
+                server_rss_samples=samples[0], loadgen_rss_samples=samples[1],
+                server_rss_peak_kib=max((s[1] for s in samples[0]), default=0),
+                loadgen_rss_peak_kib=max((s[1] for s in samples[1]), default=0))
+            self.save(key, record)
+        return record
 
     def core(self):
         base = {"seconds": self.options.seconds, "warmup": .2}
@@ -433,23 +452,28 @@ class Runner:
 
 
 def main():
-    allowed = sorted(os.sched_getaffinity(0))
-    # Prefer physical cores here on the recorded 10-vCPU host. Override on other hosts.
-    order = [c for c in (0, 2, 4, 6, 8, 1, 3, 5, 7, 9) if c in allowed] or allowed
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--target", type=Path, default=Path("/tmp/abps-reference-target"))
     parser.add_argument("--suite", choices=("smoke", "core", "alloc", "observe", "tcp", "pressure", "architecture", "isolation", "revisions", "all"), default="smoke")
     parser.add_argument("--seconds", type=float, default=2)
     parser.add_argument("--tcp-seconds", type=float, default=10)
-    parser.add_argument("--repeats", type=int, default=3)
-    parser.add_argument("--micro-cpus", type=cpus, default=order[:8])
-    parser.add_argument("--server-cpus", type=cpus, default=order[:max(1, min(4, len(order)-1))])
-    parser.add_argument("--generator-cpus", type=cpus, default=order[-1:])
-    parser.add_argument("--reader-cpus", type=cpus, default=order[4:5] or order[-1:])
+    parser.add_argument("--repeats", type=int, default=7)
+    parser.add_argument("--micro-cpus", type=cpus, default=None)
+    parser.add_argument("--server-cpus", type=cpus, default=None)
+    parser.add_argument("--generator-cpus", type=cpus, default=None)
+    parser.add_argument("--reader-cpus", type=cpus, default=None)
     parser.add_argument("--server-binary", type=Path, help="explicit preserved server for before/after runs; its hash is recorded")
     parser.add_argument("--server-prefix", default="", help="optional perf/strace command; {output} is a per-run path")
+    parser.add_argument("--smt", action="store_true")
+    parser.add_argument("--build-record", type=Path)
+    parser.add_argument("--server-build-record", type=Path)
     args = parser.parse_args()
+    order = cpu_selection(args.smt)
+    args.micro_cpus = args.micro_cpus or order
+    args.server_cpus = args.server_cpus or order[:max(0, len(order)-2)]
+    args.generator_cpus = args.generator_cpus or order[-1:]
+    args.reader_cpus = args.reader_cpus or order[-2:-1]
     if set(args.server_cpus) & set(args.generator_cpus + args.reader_cpus):
         parser.error("server and client CPU sets must be disjoint")
     if min(args.seconds, args.tcp_seconds, args.repeats) <= 0:

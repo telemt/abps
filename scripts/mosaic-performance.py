@@ -15,8 +15,6 @@ spec.loader.exec_module(berry)
 
 
 def main():
-    allowed = sorted(berry.os.sched_getaffinity(0))
-    order = allowed[::2] + allowed[1::2]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--target", type=Path, default=Path("target"))
@@ -24,11 +22,18 @@ def main():
     parser.add_argument("--repeats", type=int, default=7)
     parser.add_argument("--seconds", type=float, default=1)
     parser.add_argument("--tcp-seconds", type=float, default=3)
-    parser.add_argument("--micro-cpus", type=berry.cpus, default=order[:8])
-    parser.add_argument("--server-cpus", type=berry.cpus, default=order[:2])
-    parser.add_argument("--generator-cpus", type=berry.cpus, default=order[-1:])
-    parser.add_argument("--reader-cpus", type=berry.cpus, default=order[2:4] or order[-1:])
+    parser.add_argument("--micro-cpus", type=berry.cpus, default=None)
+    parser.add_argument("--server-cpus", type=berry.cpus, default=None)
+    parser.add_argument("--generator-cpus", type=berry.cpus, default=None)
+    parser.add_argument("--reader-cpus", type=berry.cpus, default=None)
+    parser.add_argument("--smt", action="store_true")
+    parser.add_argument("--build-record", type=Path)
     args = parser.parse_args()
+    order = berry.cpu_selection(args.smt)
+    args.micro_cpus = args.micro_cpus or order
+    args.server_cpus = args.server_cpus or order[:min(2, max(0, len(order)-2))]
+    args.generator_cpus = args.generator_cpus or order[-1:]
+    args.reader_cpus = args.reader_cpus or order[2:-1]
     if args.repeats < 1 or args.seconds <= 0 or args.tcp_seconds <= 0:
         parser.error("positive durations/repeats required")
     args.target = args.target.resolve()
@@ -42,10 +47,22 @@ def main():
                 key = f"preparation-{policy}-{trial}"
                 command = ["taskset", "-c", str(args.micro_cpus[0]), str(binary), "--case=preparation",
                            f"--preparation={policy}", "--size=1048576", "--slots=64"]
-                result = berry.subprocess.run(command, cwd=berry.ROOT, capture_output=True, text=True, timeout=60)
-                (args.output / f"{key}.stderr").write_text(result.stderr)
-                result.check_returncode()
-                runner.save(key, {**berry.json.loads(result.stdout), "command":command, "binary_sha256":berry.digest(binary)})
+                if key in runner.done:
+                    berry.require(runner.done[key]["command"] == command and runner.done[key]["binary_sha256"] == berry.digest(binary), key, "preparation identity changed; use a new output directory")
+                    continue
+                record=dict(command=command,binary_sha256=berry.digest(binary),status="incomplete")
+                try:
+                    with (args.output/f"{key}.stdout").open("w") as out, (args.output/f"{key}.stderr").open("w") as err:
+                        result=berry.subprocess.run(command,cwd=berry.ROOT,stdout=out,stderr=err,timeout=60)
+                    record["exit_codes"]=[result.returncode]
+                    result.check_returncode()
+                    record.update(berry.json.loads((args.output/f"{key}.stdout").read_text()))
+                    record["status"]="passed"
+                except Exception as error:
+                    record.update(status="incomplete" if isinstance(error,berry.subprocess.TimeoutExpired) else "failed",errors=[str(error)])
+                    raise
+                finally:
+                    runner.save(key,record)
         for policy in ["lazy", "zero-payload"]:
             runner.run(f"preparation-alloc-{policy}", dict(backend="mosaic", preparation=policy, iterations=1000), alloc=True)
     elif args.suite == "scaling":

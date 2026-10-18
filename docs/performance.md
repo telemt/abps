@@ -18,6 +18,10 @@ This is the retained reference audit. The subsequent architecture experiment and
 new measurements are in [Berry spike](berry-spike.md). Its TCP
 generator runs in another process; the older harness below remains reproducible.
 
+For current validation, provenance, CPU selection and payload checks, use the
+[measurement harness guide](performance-harness.md). Historical results below
+retain their original workload and evidence.
+
 ## Reproduce
 
 Rust 1.96, Linux, Python 3 and taskset are used by the runner. Development
@@ -34,7 +38,7 @@ python3 scripts/performance.py --suite=all \
 ```
 
 The full run is deliberately sequential: timing, allocator instrumentation and
-profiling must not compete for CPUs. The default is three trials, each with
+profiling must not compete for CPUs. The current default is seven trials, each with
 0.5 seconds warm-up and two measured seconds for microbenchmarks; TCP trials last
 ten scheduled seconds. Individual suites are `core`, `alloc`, and `tcp`.
 The output directory contains environment/source hashes, exact commands,

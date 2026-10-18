@@ -119,9 +119,23 @@ impl Delivery for Message {
         *dst = Some(self.into_writer());
     }
 }
-pub(super) async fn run_io<W: AsyncWrite + Unpin, M: Delivery>(
+pub(super) trait Queue {
+    type Item: Delivery;
+    fn poll_recv(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>>;
+    fn try_recv(&mut self) -> Option<Self::Item>;
+}
+impl<M: Delivery> Queue for mpsc::Receiver<M> {
+    type Item = M;
+    fn poll_recv(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Option<M>> {
+        mpsc::Receiver::poll_recv(self, cx)
+    }
+    fn try_recv(&mut self) -> Option<M> {
+        mpsc::Receiver::try_recv(self).ok()
+    }
+}
+pub(super) async fn run_io<W: AsyncWrite + Unpin, Q: Queue>(
     mut socket: W,
-    mut queue: mpsc::Receiver<M>,
+    mut queue: Q,
     cancel: oneshot::Receiver<()>,
     counters: Arc<WriterCounts>,
     max_batch: usize,
@@ -135,14 +149,14 @@ pub(super) async fn run_io<W: AsyncWrite + Unpin, M: Delivery>(
     tokio::select! {
         _=&mut cancellation=>Ok(()),
         result=async {
-            while let Some(message)=queue.recv().await {
+            while let Some(message)=std::future::poll_fn(|cx| queue.poll_recv(cx)).await {
                 let mut messages = std::array::from_fn(|_| None);
                 message.into_batch(&mut messages[0]);
                 let mut count = 1;
                 while count < max_batch {
                     match queue.try_recv() {
-                        Ok(message) => { message.into_batch(&mut messages[count]); count += 1; }
-                        Err(_) => break,
+                        Some(message) => { message.into_batch(&mut messages[count]); count += 1; }
+                        None => break,
                     }
                 }
                 if let Err(error) = batch(&mut socket, &mut messages, count, &counters).await {

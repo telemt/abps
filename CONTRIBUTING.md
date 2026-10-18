@@ -1342,6 +1342,45 @@ queue-credit cost independently of allocator microbenchmarks. VM results are
 exploratory; promotion requires a dedicated host and no >5% ordinary-path or p99
 regression under comparable policies.
 
+### AP-10: Fixed-arena delivery profiles and local freshness
+
+An explicit fixed-arena TCP profile may increase queue descriptors while preserving
+class slots, grants and domain byte limits. It uses `capacity-check=report` and
+reports the unchanged conservative SI-08 envelope and every deficit. It grants no
+availability guarantee. `require-envelope` and ordinary defaults are unchanged.
+Queue metadata and socket buffers remain separate from arena reservation. The
+experimental delivery profile targets per-healthy-subscriber p99 <= 5 ms under
+its stated offered load; this policy tradeoff does not relax AP-09 for ordinary
+paths or constitute a production latency guarantee.
+
+`queue-backend=local` is opt-in, restricted to Mosaic scalar/batch fan-out with
+`return=local`. Prepared queues and all their access stay on the same worker;
+their handles are !Send + !Sync. `freshness-priority=off|oldest` defaults to off.
+Oldest requires the local queue and explicit Skip. `freshness-min-age-ms` defaults
+to zero (any age qualifies), accepts 0..3600000, and is meaningful only with
+oldest. Reject unsupported combinations before creating resources.
+
+After a valid header, a full local queue may evict at most its oldest queued
+whole frame if its server-ready age reaches the configured threshold. Complete
+that ownership's Drop before admitting replacement payload. No writer-batch or
+partially written frame is eligible; surviving frames retain FIFO order. Eviction
+is irreversible even if replacement admission, input, view construction or commit
+fails. Count evictions and failed replacements separately, including cancellation.
+This policy requires an application that permits whole-frame loss; it does not
+understand codec dependencies or retract bytes already accepted by TCP. SI-06
+checks before every write attempt remain unchanged.
+
+For each prepared queue, free + ingress_reserved + queued + transferring +
+releasing = Q. A dequeue retains its credit until ownership enters a bounded
+writer batch. Cancellation/eviction finishes payload Drop before recycling that
+credit. Guards restore intermediate rights on unwind. Never retain a queue borrow
+across await, payload Drop or wake. Queue operations do bounded work without growth,
+locks, payload copies or hidden retries; shutdown drains at most Q entries.
+Record occupancy high-water marks, queue age and cancellations without new core
+atomics. Delivery reports retain planned arrivals, all loss categories and each
+subscriber's latency. A freshness eviction is part of undelivered enqueued work,
+not an excuse to remove that work from the denominator.
+
 ## Validation policy
 
 Introduce validation with the implementation it checks. No unsafe memory work

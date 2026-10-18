@@ -213,6 +213,8 @@ impl Worker {
         let setup = async {
             let mut sessions = Vec::new();
             let mut buffers = Vec::new();
+            let mut local_jobs = Vec::new();
+            let mut local_observers = Vec::new();
             if let (Some(listener), Some(fixture)) = (self.listener.take(), f) {
                 listener.set_nonblocking(true)?;
                 let listener = tokio::net::TcpListener::from_std(listener)?;
@@ -264,6 +266,20 @@ impl Worker {
                                 Some(cancel);
                             continue;
                         }
+                        if self.settings.local_queue {
+                            let (queue, receiver, observer) = local_queue::channel(
+                                self.settings.queue,
+                                self.settings.freshness_min_age,
+                            );
+                            local_jobs.push((output, receiver, stop));
+                            local_observers.push((stream, subscriber, observer));
+                            subscribers.push(Subscriber {
+                                queue: local_queue::IngressSender::Local(queue),
+                                active: true,
+                                cancel: Some(cancel),
+                            });
+                            continue;
+                        }
                         let (queue, receiver) = mpsc::channel(self.settings.queue);
                         self.senders[target]
                             .try_send(SetupJob::Writer(WriterJob {
@@ -273,7 +289,7 @@ impl Worker {
                             }))
                             .map_err(|_| "writer setup capacity/receiver unavailable")?;
                         subscribers.push(Subscriber {
-                            queue,
+                            queue: queue.into(),
                             active: true,
                             cancel: Some(cancel),
                         });
@@ -302,15 +318,16 @@ impl Worker {
                     p.ready.iter().all(|x| *x)
                 })
                 .await?;
-            Ok::<_, crate::perf_support::AnyError>((sessions, buffers))
+            Ok::<_, crate::perf_support::AnyError>((sessions, buffers, local_jobs, local_observers))
         };
-        let (sessions, buffers) = tokio::select! {
+        let (sessions, buffers, local_jobs, local_observers) = tokio::select! {
             _ = self.cohort.cancelled() => return Err("setup cancelled".into()),
             r = tokio::time::timeout_at(self.setup_deadline.into(), setup) => r.map_err(|_|"accept/handshake setup timed out")??,
         };
         let jobs: Vec<_> = self.receiver.try_iter().collect();
         let written = Arc::new(writer::WriterCounts::default());
         let mut writers = JoinSet::new();
+        let mut writer_errors = std::collections::BTreeMap::<String, usize>::new();
         let mut sources = JoinSet::new();
         for job in jobs {
             #[cfg(test)]
@@ -349,6 +366,15 @@ impl Worker {
                     });
                 }
             }
+        }
+        for (socket, queue, cancel) in local_jobs {
+            writers.spawn_local(writer::run_io(
+                into_async(socket)?,
+                queue,
+                cancel,
+                written.clone(),
+                self.settings.write_batch,
+            ));
         }
         for session in sessions {
             #[cfg(test)]
@@ -400,8 +426,10 @@ impl Worker {
                     self.cohort.0.send_modify(|p|p.ingress_done+=1);
                 },
                 r = writers.join_next(), if !writers.is_empty() => {
-                    // I/O errors are represented in client undelivered counts.
-                    r.unwrap().map_err(|_|"writer task panicked")?.ok();
+                    // A residual delivery count cannot identify an I/O failure.
+                    if let Err(error) = r.unwrap().map_err(|_|"writer task panicked")? {
+                        *writer_errors.entry(format!("{:?}", error.kind())).or_default() += 1;
+                    }
                 },
                 _ = maintenance.tick() => { if let Some(f) = f { f.maintenance(); } },
                 r = progress.changed() => { r?; },
@@ -417,10 +445,12 @@ impl Worker {
         // AP-07: remote forwarding may still be running on a different worker.
         // Serialize these counters only after cohort quiescence in run().
         self.deferred_stats = stats;
+        let local_queues: Vec<_> = local_observers.iter().map(|(stream, subscriber, observer)|
+            json!({"stream":stream,"subscriber":subscriber,"metrics":observer.json()})).collect();
         Ok(
             json!({"worker":worker,"streams":[],"writer_completed":written.completed.load(Ordering::Relaxed),
                     "write_api_calls":written.write_calls.load(Ordering::Relaxed),"expired_writers":written.expired.load(Ordering::Relaxed),
-                    "cancelled_writers":cancelled,"send_buffers":buffers}),
+                    "cancelled_writers":cancelled,"writer_io_errors":writer_errors,"send_buffers":buffers,"local_queues":local_queues}),
         )
     }
 

@@ -17,15 +17,7 @@ berry = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(berry)
 
 
-def physical_cpus(allowed):
-    """One available logical CPU per physical core; SMT requires explicit opt-in."""
-    cores = {}
-    for cpu in allowed:
-        topology = Path(f"/sys/devices/system/cpu/cpu{cpu}/topology")
-        key = (topology.joinpath("physical_package_id").read_text().strip(),
-               topology.joinpath("core_id").read_text().strip())
-        cores.setdefault(key, cpu)
-    return list(cores.values())
+from performance_support import physical_cpus, validate_branch_result
 
 
 def main():
@@ -55,8 +47,8 @@ def main():
     if args.coordinator_cpu not in allowed:
         parser.error("coordinator CPU outside affinity")
     args.micro_cpus = args.micro_cpus or [c for c in selected if c != args.coordinator_cpu] or selected
-    args.server_cpus = args.server_cpus or selected[:2]
-    args.reader_cpus = args.reader_cpus or selected[2:4] or selected
+    args.server_cpus = args.server_cpus or selected[:min(2, max(0, len(selected)-2))]
+    args.reader_cpus = args.reader_cpus or selected[2:-1]
     args.generator_cpus = args.generator_cpus or selected[-1:]
     if args.min_seconds <= 0:
         parser.error("min-seconds must be positive")
@@ -84,17 +76,25 @@ def main():
             return runner.done[name]["result"]
         command = ["taskset", "-c", str(args.coordinator_cpu), str(runner.bin / binary)]
         command += [f"--{key}={value}" for key, value in options.items()]
-        p = subprocess.run(command, capture_output=True, text=True, timeout=120, cwd=berry.ROOT)
-        (args.output / f"{name}.stderr").write_text(p.stderr)
-        (args.output / f"{name}.stdout").write_text(p.stdout)
-        p.check_returncode()
-        result = json.loads(p.stdout)
-        assert result["drained"]
-        if "offered_views" in result:
-            assert result["offered_views"] == result["accepted_views"] + result["contended_views"]
-            if options["mode"] in ("local", "borrowed"):
-                assert result["contended_views"] == 0
-        runner.save(name, dict(args=options, command=command, binary_sha256=binaries[binary], result=result))
+        record=dict(args=options, command=command, binary_sha256=binaries[binary],status="incomplete")
+        try:
+            p = subprocess.run(command, capture_output=True, text=True, timeout=120, cwd=berry.ROOT)
+            (args.output / f"{name}.stderr").write_text(p.stderr)
+            (args.output / f"{name}.stdout").write_text(p.stdout)
+            record["exit_codes"]=[p.returncode]
+            p.check_returncode()
+            result = json.loads(p.stdout)
+            record["result"]=result
+            validate_branch_result(result, options.get("mode"))
+            record["status"]="passed"
+        except Exception as error:
+            record.update(status="incomplete" if isinstance(error,subprocess.TimeoutExpired) else "failed",errors=[str(error)])
+            if isinstance(error,subprocess.TimeoutExpired):
+                for suffix,value in [("stdout",error.stdout),("stderr",error.stderr)]:
+                    (args.output / f"{name}.{suffix}").write_bytes(value.encode() if isinstance(value,str) else value or b"")
+            raise
+        finally:
+            runner.save(name,record)
         return result
 
     run("allocation-control", "branches_alloc", dict(iterations=1000))
@@ -103,7 +103,7 @@ def main():
     if args.suite != "tcp":
         threads = [1, min(2, len(args.micro_cpus))] if args.suite == "smoke" else [1, 2, 4, 8, 16, 32]
         for n in sorted(set(threads)):
-            if n > len(args.micro_cpus):
+            if n > len(args.micro_cpus) or (not args.smt and len(physical_cpus(args.micro_cpus[:n])) < n):
                 runner.save(f"threads-{n}-unvalidated", {"status": "unvalidated", "reason": "insufficient distinct CPUs", "threads": n})
                 continue
             for trial in range(repeats):

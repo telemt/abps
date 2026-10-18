@@ -17,10 +17,12 @@ MATRIX = ROOT / "verification/matrix.json"
 NATIVE = ["", "berry-spike", "bytes-interop", "mosaic-spike", "mosaic-spike,bytes-interop", "local-branches-spike", "local-branches-spike,bytes-interop"]
 FULL = NATIVE[-1]
 MIRI_GROUPS = [(["--lib"],"berry::raw::"),(["--lib"],"mosaic::raw::"),(["--test","model"],"mem_own_life_same_trace"),(["--test","model"],"reservations::"),(["--test","adversarial"],""),(["--test","local_branches"],"four_ledgers"),(["--test","issuer_snapshots"],""),(["--test","configuration"],"")]
+LOCAL_QUEUE = (["--example", "spike_probe"], "ap10_")
+MIRI_GROUPS.append(LOCAL_QUEUE)
 ADAPTER_CREDITS = (["--example", "spike_probe"], "spike_support::network::worker_fanout::tests::")
 SANITIZER_GROUPS = [(["--lib"], "raw::"), (["--test", "model"], ""),
                     (["--test", "adversarial"], ""), (["--test", "local_branches"], ""),
-                    (["--test", "issuer_snapshots"], ""), (["--test", "configuration"], ""), (["--test", "issuer_stress"], ""), ADAPTER_CREDITS,
+                    (["--test", "issuer_snapshots"], ""), (["--test", "configuration"], ""), (["--test", "issuer_stress"], ""), ADAPTER_CREDITS, LOCAL_QUEUE,
                     (["--example","spike_probe"],"abps_scripted_")]
 NIGHTLY = "nightly-2026-10-03"
 REFERENCE_CONFIG_TEST = "verification_config::reference_acquire_mode_matches_campaign"
@@ -629,6 +631,9 @@ class Runner:
             self.run("performance-build",["cargo","build","--locked","--release","--examples","--features",FULL])
             for script,suite in [("berry-performance.py","core"),("berry-performance.py","tcp"),("mosaic-performance.py","compare"),("mosaic-performance.py","tcp"),("local-branches-performance.py","compare")]:
                 self.run("performance-"+suite,[sys.executable,str(ROOT/"scripts"/script),"--target",str(self.build/"native"),"--suite",suite,"--repeats","7","--output",str(self.out/(script+"-"+suite))],timeout=self.args.timeout)
+                from performance_support import read_records
+                qualified=read_records(self.out/(script+"-"+suite)/"results.jsonl")
+                require(qualified,"empty performance suite")
         self.meta["performance_evidence"]="primitive measurements only; compare existing offered-load and tail probes on dedicated hardware" if self.args.dedicated_host else "functional benchmark smoke only; no performance gate"
         self.save()
 

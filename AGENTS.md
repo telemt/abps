@@ -109,6 +109,17 @@ and diagnostic checks before adapter or layout optimization.
 
 ## Seven mandatory rules
 
+AP-10 allows an explicit fixed-arena TCP profile with `capacity-check=report`.
+Changing queue depth must not silently increase slots, grants or byte limits.
+The opt-in local queue stays worker-local and is restricted to Mosaic scalar/batch
+fan-out. Oldest-first freshness requires explicit Skip and may evict only a whole
+queued frame after its configured minimum age; complete its Drop before replacement
+admission. Never evict writer-batch or partially written frames. Preserve FIFO for
+survivors, the queue credit equation, bounded cancellation, and SI-06 deadlines.
+Report irreversible evictions, failed replacements and queue metadata separately.
+Keep defaults unchanged; the profile's 5 ms healthy-subscriber p99 target does not
+weaken AP-09 or establish a production latency guarantee.
+
 1. **No hidden allocation in steady-state hot paths.** Include metadata,
    collections, per-view objects, system frees, mapping changes, helping, errors,
    and first return from a previously uninvolved thread.

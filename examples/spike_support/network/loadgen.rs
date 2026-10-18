@@ -18,12 +18,32 @@ struct Schedule {
     unserviceable: u64,
 }
 
-fn route(id: u64, streams: usize, skew: bool) -> usize {
+pub(super) fn route(id: u64, streams: usize, skew: bool) -> usize {
     if skew && id % 10 < 9 {
         0
     } else {
         (id as usize / if skew { 10 } else { 1 }) % streams
     }
+}
+
+// Number of scheduled arrivals for this stream before id, including arrivals
+// later missed by the pacer or skipped by the server. Received counts are not IDs.
+pub(super) fn sequence_before(id: u64, stream: usize, streams: usize, skew: bool) -> u64 {
+    if !skew {
+        return id / streams as u64;
+    }
+    let blocks = id / 10;
+    let routed = if blocks > stream as u64 {
+        1 + (blocks - 1 - stream as u64) / streams as u64
+    } else {
+        0
+    };
+    routed
+        + if stream == 0 {
+            blocks * 9 + (id % 10).min(9)
+        } else {
+            0
+        }
 }
 
 fn pace(
@@ -98,7 +118,9 @@ fn pace(
 async fn source(
     mut socket: TcpStream,
     mut queue: mpsc::Receiver<Header>,
-    payload: Arc<Vec<u8>>,
+    mut payload: Vec<u8>,
+    seed: u64,
+    stream: usize,
     end: tokio::time::Instant,
 ) -> (u64, u64) {
     let (mut sent, mut failed) = (0, 0);
@@ -108,6 +130,7 @@ async fn source(
             failed += 1;
             continue;
         }
+        payload::fill_payload(&mut payload[..header.len], seed, stream, header.id);
         match tokio::time::timeout_at(
             end,
             write_frame(&mut socket, header, &payload[..header.len]),
@@ -183,11 +206,17 @@ pub(super) fn run(args: &Args) -> Result<Value> {
                 return Err("server readiness handshake failed".into());
             }
         }
+        // Scratch and histograms are prepared before the scheduled window.
+        let consumer_storage: Vec<_> = sockets.iter().map(|(_, stream, subscriber)|
+            (Consumer::new(*stream, *subscriber), vec![0; settings.max_payload()])).collect();
+        let source_storage: Vec<_> = sources.iter().map(|_|vec![0; settings.max_payload()]).collect();
+        let validation = Validation { settings: settings.clone(), rate: rate as u64,
+            planned: (settings.seconds.as_secs_f64() * rate as f64).floor() as u64, skew };
         let start = Instant::now() + Duration::from_millis(100);
         let end = start + settings.seconds;
         let reader_deadline = tokio::time::Instant::from_std(end + Duration::from_secs(2));
         let mut consumers = Vec::new();
-        for (socket, stream, subscriber) in sockets {
+        for ((socket, stream, subscriber), (stats, scratch)) in sockets.into_iter().zip(consumer_storage) {
             let delay = if settings.slow && stream == 0 && subscriber == 0 {
                 Duration::from_secs_f64(4.0 * settings.streams as f64 / rate as f64)
                     .max(Duration::from_millis(5))
@@ -196,24 +225,25 @@ pub(super) fn run(args: &Args) -> Result<Value> {
             };
             consumers.push(tokio::spawn(consume(
                 socket,
-                Consumer::new(stream, subscriber),
+                stats,
                 start,
                 reader_deadline,
-                settings.max_payload(),
+                scratch,
                 delay,
-                settings.max_frame_age,
+                validation.clone(),
             )));
         }
-        let payload = Arc::new(vec![0x5a; settings.max_payload()]);
         let mut writers = Vec::new();
         let mut queues = Vec::new();
-        for socket in sources {
+        for (stream, (socket, scratch)) in sources.into_iter().zip(source_storage).enumerate() {
             let (tx, rx) = mpsc::channel(queue_capacity);
             queues.push(tx);
             writers.push(tokio::spawn(source(
                 socket,
                 rx,
-                payload.clone(),
+                scratch,
+                settings.seed,
+                stream,
                 tokio::time::Instant::from_std(end),
             )));
         }
@@ -238,6 +268,7 @@ pub(super) fn run(args: &Args) -> Result<Value> {
             sent += s;
             failed += f;
         }
+        let source_completed_seconds = start.elapsed().as_secs_f64();
         let mut total = Latency::default();
         let (mut delivered, mut bytes, mut overdue, mut invalid, mut timely_bytes) = (0, 0, 0, 0, 0);
         let mut results = Vec::new();
@@ -257,17 +288,17 @@ pub(super) fn run(args: &Args) -> Result<Value> {
             schedule.enqueued + schedule.full + schedule.closed
         );
         assert_eq!(schedule.enqueued, sent + failed);
-        if invalid != 0 {
-            return Err("consumer detected invalid data/order".into());
-        }
-        Ok(json!({"role":"loadgen", "source":{
+        Ok(json!({"role":"loadgen", "failed":invalid!=0, "payload_pattern":payload::VERSION,
+            "measurement_seconds":settings.seconds.as_secs_f64(),
+            "source_completed_seconds":source_completed_seconds,
+            "load_and_drain_seconds":start.elapsed().as_secs_f64(), "source":{
             "planned":schedule.planned,"attempted":schedule.attempted,"sent":sent,
             "missed_arrivals":schedule.missed,"failed_writes":failed,"enqueued":schedule.enqueued,
             "queue_full":schedule.full,"queue_closed":schedule.closed,
             "planned_classes_by_stream":schedule.classes,"sequence_hash":format!("{:016x}",schedule.sequence_hash),
             "planned_requested_bytes":schedule.requested_bytes,"planned_rounded_bytes":schedule.rounded_bytes,"unserviceable_frames":schedule.unserviceable,"queue_capacity":queue_capacity,
             "seed":settings.seed,"keyframe_burst":settings.keyframe_burst},
-            "consumers":results,"total":{"delivered":delivered,"bytes":bytes,"overdue":overdue,
+            "consumers":results,"total":{"invalid":invalid,"delivered":delivered,"bytes":bytes,"overdue":overdue,
             "timely_delivered":delivered-overdue,"expired_delivered":overdue,"timely_bytes":timely_bytes,
             "max_frame_age_ms":settings.max_frame_age.map(|a|a.as_millis()),
             "timely_delivered_per_planned_s":(delivered-overdue) as f64/settings.seconds.as_secs_f64(),
@@ -294,6 +325,7 @@ mod tests {
             let mut large = [0; 4];
             for id in 0..32000 {
                 let stream = route(id, 4, skew);
+                assert_eq!(sequence_before(id, stream, 4, skew), sequence[stream]);
                 large[stream] +=
                     usize::from(settings.payload_size(stream, sequence[stream]) == 2097152);
                 sequence[stream] += 1;

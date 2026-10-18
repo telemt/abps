@@ -2218,6 +2218,87 @@
         "native"
       ],
       "critical": false
+    },
+    {
+      "id": "consumer-integrity",
+      "selector": "spike_support::network::consumer_tests::abps_scripted_consumer_corruption_identity_and_skip_gaps",
+      "invariants": [
+        "AP-09",
+        "SI-04",
+        "IO-01"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "consumer-terminal",
+      "selector": "spike_support::network::consumer_tests::abps_scripted_consumer_partial_reads_and_terminal_outcomes",
+      "invariants": [
+        "AP-09",
+        "SI-06",
+        "IO-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "queue-profile-plan",
+      "selector": "spike_support::network::plan::tests::ap09_queue_profiles_match_exact_envelopes_and_reject_deficits",
+      "invariants": [
+        "SI-08",
+        "AP-09"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "local-queue-conservation",
+      "selector": "spike_support::network::local_queue::tests::ap10_",
+      "invariants": [
+        "AP-10",
+        "AP-07",
+        "SI-04",
+        "SI-06"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
     }
   ],
   "intentional_retention": [
@@ -2287,6 +2368,19 @@
         "--iterations=1000"
       ],
       "invariants": [
+        "AP-07"
+      ]
+    },
+    {
+      "id": "local-queue",
+      "example": "spike_alloc",
+      "arguments": [
+        "--backend=mosaic",
+        "--case=local-queue",
+        "--iterations=10000"
+      ],
+      "invariants": [
+        "AP-10",
         "AP-07"
       ]
     }
@@ -3562,6 +3656,8 @@
     }
   ],
   "infrastructure_tests": [
-    "EvidenceRegressions"
+    "EvidenceRegressions",
+    "PerformanceContracts",
+    "PerformanceProcessContracts"
   ]
 }

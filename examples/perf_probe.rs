@@ -22,5 +22,8 @@ fn main() -> Result<()> {
         _ => return Err("case must be micro, snapshot, retention, handoff, or tcp".into()),
     };
     println!("{}", json!({"args": args.0, "result": result}));
+    if result.get("failed").and_then(serde_json::Value::as_bool) == Some(true) {
+        return Err("measurement failed; JSON retained above".into());
+    }
     Ok(())
 }

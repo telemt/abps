@@ -176,18 +176,26 @@ impl PipelinePlan {
                 metadata_is_modeled,
                 backing_is_modeled: backend == "bytes",
                 scratch_bytes: mul(streams.len(), s.max_payload().min(16 * 1024))?,
-                queue_storage: mul(queued, {
-                    #[cfg(feature = "local-branches-spike")]
-                    if s.worker_branches {
-                        std::mem::size_of::<worker_fanout::LocalDelivery>()
-                    } else {
-                        std::mem::size_of::<Message>()
-                    }
-                    #[cfg(not(feature = "local-branches-spike"))]
-                    {
-                        std::mem::size_of::<Message>()
-                    }
-                })?,
+                queue_storage: if s.local_queue {
+                    mul(
+                        writers,
+                        local_queue::storage_model_bytes::<Message>(s.queue)
+                            .ok_or("local queue model overflow")?,
+                    )?
+                } else {
+                    mul(queued, {
+                        #[cfg(feature = "local-branches-spike")]
+                        if s.worker_branches {
+                            std::mem::size_of::<worker_fanout::LocalDelivery>()
+                        } else {
+                            std::mem::size_of::<Message>()
+                        }
+                        #[cfg(not(feature = "local-branches-spike"))]
+                        {
+                            std::mem::size_of::<Message>()
+                        }
+                    })?
+                },
                 mailbox_storage: {
                     #[cfg(feature = "local-branches-spike")]
                     if s.worker_branches {
@@ -253,7 +261,7 @@ impl PipelinePlan {
                 "reservation_bytes":r.reservation_bytes,"writers":r.writers,"configured_backing_bytes":r.backing_bytes,"backing_is_modeled":r.backing_is_modeled,"metadata_bytes":r.metadata_bytes,
                 "metadata_is_modeled":r.metadata_is_modeled})
         }).collect();
-        json!({"roots":roots,"class_slots":s.class_slots,"class_capacities":s.class_capacities,"distribution":s.distribution,"write_batch":s.write_batch,
+        json!({"queue_backend":if s.local_queue {"local"} else {"tokio"},"freshness_priority":if s.freshness_min_age.is_some() {"oldest"} else {"off"},"freshness_min_age_ms":s.freshness_min_age.map(|v|v.as_millis()),"roots":roots,"class_slots":s.class_slots,"class_capacities":s.class_capacities,"distribution":s.distribution,"write_batch":s.write_batch,
             "capacity_check":if s.require_envelope {"require-envelope"} else {"report"},
             "fanout_api":if s.worker_branches {"worker-branches"} else if s.local_branches {"local-branches"} else if s.batch_fanout {"batch"} else {"scalar"},
             "capacity_policy":format!("{:?}",s.capacity_policy),"max_frame_age_ms":s.max_frame_age.map(|a|a.as_millis()),
@@ -276,6 +284,35 @@ mod tests {
                 .collect(),
         ))
         .unwrap()
+    }
+    #[cfg(feature = "mosaic-spike")]
+    #[test]
+    fn ap09_queue_profiles_match_exact_envelopes_and_reject_deficits() {
+        for (backend, fanout, queue, slots, budget) in [
+            ("berry", 1, 8, 34, 25500),
+            ("mosaic", 4, 8, 130, 97500),
+            ("mosaic", 4, 32, 322, 241500),
+            ("mosaic", 4, 64, 578, 433500),
+        ] {
+            let mut s = settings(&[
+                ("streams", "2"),
+                ("capacity-policy", "reserved"),
+                ("capacity-check", "require-envelope"),
+            ]);
+            s.fanout = fanout;
+            s.queue = queue;
+            s.write_batch = 8;
+            s.class_slots = vec![slots, slots];
+            s.domain_limit = Some(budget);
+            let p = PipelinePlan::new(&s, false, backend).unwrap();
+            assert_eq!(p.domain(0).envelope, slots / 2);
+            assert_eq!(p.domain(0).required_bytes, budget);
+            s.class_slots[0] -= 1;
+            assert!(PipelinePlan::new(&s, false, backend).is_err());
+            s.class_slots[0] += 1;
+            s.domain_limit = Some(budget - 1);
+            assert!(PipelinePlan::new(&s, false, backend).is_err());
+        }
     }
     #[test]
     fn si08_strict_and_report_share_the_same_typed_plan() {

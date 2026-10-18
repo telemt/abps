@@ -2,6 +2,7 @@
 pub mod backend;
 pub mod core;
 pub mod metrics;
+pub mod payload;
 pub mod tcp;
 
 use std::collections::BTreeMap;
