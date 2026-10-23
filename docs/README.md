@@ -1,7 +1,9 @@
 # ABPS documentation
 
-The current guides are synchronized with upstream
-[`668d2f3`](https://github.com/telemt/abps/commit/668d2f3f1f20ce726e06c87e2b809b7acca19373).
+The core backend guides use upstream
+[`668d2f3`](https://github.com/telemt/abps/commit/668d2f3f1f20ce726e06c87e2b809b7acca19373)
+as their integration baseline. Later local adapter experiments are qualified in
+the linked reports below.
 All backends remain unpublished experiments. English is canonical; identifiers
 and invariant IDs retain their exact spelling.
 
@@ -17,6 +19,7 @@ and invariant IDs retain their exact spelling.
 | How do domains, shutdown and replacement work? | [Lifecycle and preparation](lifecycle-and-preparation.md) |
 | How are performance results validated? | [Current measurement harness](performance-harness.md) |
 | How can delivery improve at fixed arena capacity? | [Fixed-arena delivery profiles](fixed-arena-delivery.md) |
+| How can one consumer reuse a retained lease? | [Serial adapter](serial-reuse.md) |
 | How are claims tested? | [Verification guide](verification.md), [registry](../verification/matrix.json), [unsafe inventory](../verification/unsafe-sites.json) |
 
 CONTRIBUTING defines semantics. Guides explain those semantics and cite their IDs.
@@ -30,6 +33,12 @@ and selected API validation performed against this upstream revision.
 
 The [performance harness correction](reports/2026-10-18/performance-review.md)
 records the later local implementation checks and repeat measurements.
+The [adaptive freshness experiment](reports/2026-10-18/adaptive-freshness.md)
+records the sliding queue policy, dependency recovery and fixed-arena comparisons.
+The [adapter hot-path experiments](reports/2026-10-19/hot-path-experiments.md)
+compare timekeeping, metadata, staging and disposable queue representations.
+The [memory shortcuts implementation](reports/2026-10-23/memory-shortcuts.md)
+records serial reuse, admission-check reuse, class lookup and optional thin LTO.
 
 ## Architecture and measurement history
 
@@ -80,3 +89,5 @@ separately, add its public URL and SHA-256 to the report.
 Local evidence retains its original names and contents. Source hashes, test counts,
 excluded attempts, platform limits and measurement denominators must not be
 relabeled as results for a later revision.
+
+- [Adaptive memory research](adaptive-memory.md): AP-13 soft budgets and root generations; AP-14 shared opportunity, class pressure and conservative admission observations.

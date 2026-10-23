@@ -18,11 +18,15 @@ NATIVE = ["", "berry-spike", "bytes-interop", "mosaic-spike", "mosaic-spike,byte
 FULL = NATIVE[-1]
 MIRI_GROUPS = [(["--lib"],"berry::raw::"),(["--lib"],"mosaic::raw::"),(["--test","model"],"mem_own_life_same_trace"),(["--test","model"],"reservations::"),(["--test","adversarial"],""),(["--test","local_branches"],"four_ledgers"),(["--test","issuer_snapshots"],""),(["--test","configuration"],"")]
 LOCAL_QUEUE = (["--example", "spike_probe"], "ap10_")
-MIRI_GROUPS.append(LOCAL_QUEUE)
+ADAPTIVE_QUEUE = (["--example", "spike_probe"], "ap11_")
+HOTPATH_ADAPTER = (["--example", "spike_probe"], "ap12_")
+MEMORY_ADAPTER = (["--example", "spike_probe"], "ap13_")
+SHARED_MEMORY = (["--example", "spike_probe"], "ap14_")
+MIRI_GROUPS.extend([LOCAL_QUEUE, ADAPTIVE_QUEUE, HOTPATH_ADAPTER, MEMORY_ADAPTER, SHARED_MEMORY])
 ADAPTER_CREDITS = (["--example", "spike_probe"], "spike_support::network::worker_fanout::tests::")
 SANITIZER_GROUPS = [(["--lib"], "raw::"), (["--test", "model"], ""),
                     (["--test", "adversarial"], ""), (["--test", "local_branches"], ""),
-                    (["--test", "issuer_snapshots"], ""), (["--test", "configuration"], ""), (["--test", "issuer_stress"], ""), ADAPTER_CREDITS, LOCAL_QUEUE,
+                    (["--test", "issuer_snapshots"], ""), (["--test", "configuration"], ""), (["--test", "issuer_stress"], ""), ADAPTER_CREDITS, LOCAL_QUEUE, ADAPTIVE_QUEUE, HOTPATH_ADAPTER, MEMORY_ADAPTER, SHARED_MEMORY,
                     (["--example","spike_probe"],"abps_scripted_")]
 NIGHTLY = "nightly-2026-10-03"
 REFERENCE_CONFIG_TEST = "verification_config::reference_acquire_mode_matches_campaign"

@@ -14,6 +14,10 @@ pub mod berry;
 #[cfg(feature = "mosaic-spike")]
 pub mod mosaic;
 
+// Like Mosaic storage, the safe wrapper is outside the atomic-only Loom model.
+#[cfg(all(feature = "serial-adapter", not(all(test, feature = "loom-model"))))]
+pub mod serial;
+
 #[cfg(all(test, feature = "loom-model"))]
 #[path = "test_support/loom.rs"]
 mod loom_support;

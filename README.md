@@ -26,6 +26,11 @@ The optional `local-branches-spike` extends Mosaic with a transferable `Branch`
 and `!Send + !Sync` local owning views. One local family holds one global backing
 right. Scalar buffers remain the default; see [local branches](docs/local-branches.md).
 
+The optional `serial-adapter` reuses one retained Mosaic mutable lease for a
+serial consumer through borrowed write/frame guards. It keeps the entire slot
+charged between frames; see [serial reuse](docs/serial-reuse.md) for initialization,
+cancellation and shutdown semantics. Ordinary buffer and TCP defaults are unchanged.
+
 ## Resource contract
 
 - **Reservation:** prepare and account for payload, metadata and layout padding.
@@ -79,6 +84,10 @@ and support explicit skip, freshness and worker fan-out policies. Applications
 must bound queues, tasks, in-flight I/O and overlapping roots separately. Read the
 [adapter lifecycle guide](docs/lifecycle-and-preparation.md) and
 [performance evidence](docs/performance.md) before interpreting throughput results.
+
+The opt-in [admission dynamics experiment](docs/admission-dynamics.md) compares
+greedy and paced admission with a fixed arena. It is a research adapter, not a
+core allocation policy or a stability guarantee.
 
 ## Safety and verification
 

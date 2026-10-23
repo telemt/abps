@@ -20,16 +20,42 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 
+mod adaptive;
 mod ingress;
+mod input;
+mod memory;
+#[cfg(feature = "mosaic-spike")]
+pub fn memory_allocation_probe(
+    allocator: &stats_alloc::StatsAlloc<std::alloc::System>,
+    args: &Args,
+) -> Result<Value> {
+    memory::allocation_probe(allocator, args)
+}
+#[cfg(feature = "mosaic-spike")]
+pub fn memory_replay(args: &Args) -> Result<Value> {
+    memory::replay(args)
+}
+#[cfg(feature = "mosaic-spike")]
+pub fn staged_allocation_probe(
+    allocator: &stats_alloc::StatsAlloc<std::alloc::System>,
+    iterations: usize,
+) -> Result<Value> {
+    input::allocation_probe(allocator, iterations)
+}
 mod local_queue;
 #[cfg(feature = "mosaic-spike")]
 pub fn local_queue_allocation_probe(
     allocator: &stats_alloc::StatsAlloc<std::alloc::System>,
     iterations: usize,
+    adaptive: bool,
 ) -> Result<Value> {
-    local_queue::allocation_probe(allocator, iterations)
+    local_queue::allocation_probe(allocator, iterations, adaptive)
 }
 mod plan;
+mod probe;
+pub fn adapter_probe(args: &Args) -> Result<Value> {
+    probe::run(args)
+}
 #[cfg(test)]
 mod scripted_io;
 mod server;
@@ -38,8 +64,19 @@ mod worker_fanout;
 mod writer;
 
 const HEADER: usize = 20;
+const HEADER_V2: usize = 32;
+const WIRE_V2: [u8; 8] = *b"ABPS\x02\0\0\0";
+#[derive(Clone, Copy)]
+enum SlowPattern {
+    Constant,
+    Pause,
+    Ramp,
+    StopResume,
+}
 #[derive(Clone)]
 struct Settings {
+    memory: Option<memory::Options>,
+    arrival_pattern: String,
     workers: usize,
     streams: usize,
     fanout: usize,
@@ -47,7 +84,12 @@ struct Settings {
     write_batch: usize,
     local_queue: bool,
     freshness_min_age: Option<Duration>,
+    adaptive: Option<adaptive::AdaptivePolicy>,
+    keyframe_interval: u64,
     read_buf: bool,
+    staged_copy: bool,
+    ingress_buffer_bytes: Option<usize>,
+    external_memory_limit: Option<usize>,
     capacity_policy: CapacityPolicy,
     class_slots: Vec<usize>,
     class_capacities: Vec<usize>,
@@ -69,6 +111,7 @@ struct Settings {
     remote: bool,
     skip: bool,
     slow: bool,
+    slow_pattern: SlowPattern,
 }
 impl Settings {
     fn new(args: &Args) -> Result<Self> {
@@ -78,7 +121,7 @@ impl Settings {
         let queue = args.n("queue", 8);
         let write_batch = args.n("write-batch", 1);
         let read_buf = match args.get("ingress", "initialized") {
-            "initialized" => false,
+            "initialized" | "staged-copy" => false,
             "read-buf" => true,
             _ => return Err("invalid ingress mode".into()),
         };
@@ -88,6 +131,20 @@ impl Settings {
         {
             return Err("read-buf requires bytes-interop and a berry or mosaic backend".into());
         }
+        let staged_copy = args.get("ingress", "initialized") == "staged-copy";
+        let ingress_buffer_bytes = args
+            .0
+            .get("ingress-buffer-bytes")
+            .map(|s| s.parse::<usize>())
+            .transpose()?;
+        if ingress_buffer_bytes.is_some_and(|n| !staged_copy || !(1..=16384).contains(&n)) {
+            return Err("ingress-buffer-bytes requires staged-copy and 1..=16384 bytes".into());
+        }
+        let external_memory_limit = args
+            .0
+            .get("external-memory-limit-bytes")
+            .map(|s| s.parse::<usize>())
+            .transpose()?;
         let keyframe_burst = args.n("keyframe-burst", 1);
         let capacity_policy = match args.get("capacity-policy", "unreserved") {
             "unreserved" => CapacityPolicy::Unreserved,
@@ -213,9 +270,11 @@ impl Settings {
             "local" => true,
             _ => return Err("invalid queue-backend".into()),
         };
+        let adaptive_mode = args.get("freshness-priority", "off") == "adaptive";
         let freshness = match args.get("freshness-priority", "off") {
             "off" => false,
             "oldest" => true,
+            "adaptive" => false,
             _ => return Err("invalid freshness-priority".into()),
         };
         let min_age = args
@@ -237,6 +296,47 @@ impl Settings {
         if freshness && (!local_queue || !skip) {
             return Err("oldest requires queue-backend=local and overflow=skip".into());
         }
+        let keyed = match args.get("frame-dependencies", "independent") {
+            "independent" => false,
+            "keyframe" => true,
+            _ => return Err("invalid frame-dependencies".into()),
+        };
+        let duration = |key: &str, default: u64| -> Result<Duration> {
+            let value = args
+                .0
+                .get(key)
+                .map(|s| s.parse::<u64>())
+                .transpose()?
+                .unwrap_or(default);
+            if !(1..=3_600_000).contains(&value) || (!adaptive_mode && args.0.contains_key(key)) {
+                return Err(format!("{key} requires adaptive and 1..3600000 ms").into());
+            }
+            Ok(Duration::from_millis(value))
+        };
+        let policy = adaptive::AdaptivePolicy {
+            target: duration("freshness-target-ms", 20)?,
+            grace: duration("slow-grace-ms", 2000)?,
+            stall: duration("write-stall-ms", 500)?,
+            key_wait: duration("keyframe-wait-ms", 5000)?,
+            keyed,
+        };
+        if (adaptive_mode && (!local_queue || !skip))
+            || (keyed && !adaptive_mode)
+            || (!keyed && args.0.contains_key("keyframe-wait-ms"))
+        {
+            return Err(
+                "adaptive requires local queue and Skip; keyframe requires adaptive".into(),
+            );
+        }
+        let keyframe_interval = args
+            .0
+            .get("keyframe-interval")
+            .map(|s| s.parse::<u64>())
+            .transpose()?
+            .unwrap_or(20);
+        if keyframe_interval == 0 || (!keyed && args.0.contains_key("keyframe-interval")) {
+            return Err("keyframe-interval requires keyframe mode and a positive count".into());
+        }
         let freshness_min_age = freshness.then(|| Duration::from_millis(min_age.unwrap_or(0)));
         let setup_ms = args.n("setup-timeout-ms", 30_000);
         let drain_ms = args.n("drain-timeout-ms", 2_000);
@@ -248,7 +348,30 @@ impl Settings {
             "zero-payload" if args.get("backend", "berry") == "mosaic" => true,
             _ => return Err("preparation must be lazy or mosaic zero-payload".into()),
         };
+        let arrival_pattern = args.get("arrival-pattern", "steady");
+        if !matches!(
+            arrival_pattern,
+            "steady" | "synchronized" | "shifted" | "phase-change"
+        ) || (arrival_pattern != "steady" && args.get("load", "uniform") != "uniform")
+        {
+            return Err("burst arrivals require a supported pattern and uniform load".into());
+        }
+        let memory = memory::Options::parse(args, streams)?;
+        if memory.is_some()
+            && (!cfg!(feature = "mosaic-spike")
+                || args.get("backend", "berry") != "mosaic"
+                || workers != 1
+                || !local_queue
+                || remote
+                || !skip
+                || local_branches
+                || worker_branches)
+        {
+            return Err("memory policy requires one Mosaic issuer, local queues/returns, scalar/batch and Skip".into());
+        }
         Ok(Self {
+            memory,
+            arrival_pattern: arrival_pattern.into(),
             setup_timeout: Duration::from_millis(setup_ms as u64),
             drain_timeout: Duration::from_millis(drain_ms as u64),
             zero_payload,
@@ -259,7 +382,12 @@ impl Settings {
             write_batch,
             local_queue,
             freshness_min_age,
+            adaptive: adaptive_mode.then_some(policy),
+            keyframe_interval,
             read_buf,
+            staged_copy,
+            ingress_buffer_bytes,
+            external_memory_limit,
             capacity_policy,
             class_slots,
             class_capacities,
@@ -284,8 +412,21 @@ impl Settings {
             remote,
             skip,
             slow: args.get("slow", "no") == "yes",
+            slow_pattern: match args.get("slow-profile", "constant") {
+                "constant" => SlowPattern::Constant,
+                "pause" => SlowPattern::Pause,
+                "ramp" => SlowPattern::Ramp,
+                "stop-resume" => SlowPattern::StopResume,
+                _ => return Err("invalid slow-profile".into()),
+            },
             seconds: args.seconds("seconds", 10.0),
         })
+    }
+    fn keyed(&self) -> bool {
+        self.adaptive.is_some_and(|p| p.keyed)
+    }
+    fn header_len(&self) -> usize {
+        if self.keyed() { HEADER_V2 } else { HEADER }
     }
     fn runtime_workers(&self) -> usize {
         if self.remote {
@@ -299,6 +440,19 @@ impl Settings {
     }
     fn max_class(&self) -> usize {
         *self.class_capacities.last().unwrap()
+    }
+    fn scratch_bytes(&self) -> usize {
+        self.ingress_buffer_bytes
+            .unwrap_or(self.max_payload().min(16384))
+    }
+    fn ingress_name(&self) -> &'static str {
+        if self.staged_copy {
+            "staged-copy"
+        } else if self.read_buf {
+            "read-buf"
+        } else {
+            "initialized"
+        }
     }
     fn max_payload(&self) -> usize {
         if self.frames { 2097152 } else { 1500 }
@@ -342,8 +496,10 @@ impl Settings {
         }
     }
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 struct Header {
+    sequence: Option<u64>,
+    keyframe: bool,
     len: usize,
     id: u64,
     due: u64,
@@ -356,6 +512,50 @@ impl Header {
         bytes[12..].copy_from_slice(&self.due.to_be_bytes());
         bytes
     }
+    fn wire_len(&self) -> usize {
+        if self.sequence.is_some() {
+            HEADER_V2
+        } else {
+            HEADER
+        }
+    }
+    fn wire(&self) -> [u8; HEADER_V2] {
+        let mut bytes = [0; HEADER_V2];
+        bytes[..HEADER].copy_from_slice(&self.encode());
+        if let Some(seq) = self.sequence {
+            bytes[20..28].copy_from_slice(&seq.to_be_bytes());
+            bytes[28] = u8::from(self.keyframe);
+        }
+        bytes
+    }
+    fn decode(bytes: &[u8]) -> std::io::Result<Self> {
+        if !matches!(bytes.len(), HEADER | HEADER_V2) {
+            return Err(std::io::ErrorKind::InvalidData.into());
+        }
+        let mut header = Self {
+            len: u32::from_be_bytes(bytes[..4].try_into().unwrap()) as usize,
+            id: u64::from_be_bytes(bytes[4..12].try_into().unwrap()),
+            due: u64::from_be_bytes(bytes[12..20].try_into().unwrap()),
+            ..Self::default()
+        };
+        if bytes.len() == HEADER_V2 {
+            if bytes[28] > 1 || bytes[29..].iter().any(|b| *b != 0) {
+                return Err(std::io::ErrorKind::InvalidData.into());
+            }
+            header.sequence = Some(u64::from_be_bytes(bytes[20..28].try_into().unwrap()));
+            header.keyframe = bytes[28] == 1;
+        }
+        Ok(header)
+    }
+    async fn read_mode<R: tokio::io::AsyncRead + Unpin>(
+        stream: &mut R,
+        keyed: bool,
+    ) -> std::io::Result<Self> {
+        let len = if keyed { HEADER_V2 } else { HEADER };
+        let mut bytes = [0; HEADER_V2];
+        stream.read_exact(&mut bytes[..len]).await?;
+        Self::decode(&bytes[..len])
+    }
     async fn read<R: tokio::io::AsyncRead + Unpin>(stream: &mut R) -> std::io::Result<Self> {
         let mut bytes = [0; HEADER];
         stream.read_exact(&mut bytes).await?;
@@ -363,6 +563,7 @@ impl Header {
             len: u32::from_be_bytes(bytes[..4].try_into().unwrap()) as usize,
             id: u64::from_be_bytes(bytes[4..12].try_into().unwrap()),
             due: u64::from_be_bytes(bytes[12..].try_into().unwrap()),
+            ..Self::default()
         })
     }
 }
@@ -371,15 +572,19 @@ async fn write_frame(
     header: Header,
     payload: &[u8],
 ) -> std::io::Result<()> {
-    let bytes = header.encode();
+    let bytes = header.wire();
+    let header_len = header.wire_len();
     let mut offset = 0;
-    while offset < HEADER + payload.len() {
-        let written = if offset < HEADER {
+    while offset < header_len + payload.len() {
+        let written = if offset < header_len {
             socket
-                .write_vectored(&[IoSlice::new(&bytes[offset..]), IoSlice::new(payload)])
+                .write_vectored(&[
+                    IoSlice::new(&bytes[offset..header_len]),
+                    IoSlice::new(payload),
+                ])
                 .await?
         } else {
-            socket.write(&payload[offset - HEADER..]).await?
+            socket.write(&payload[offset - header_len..]).await?
         };
         if written == 0 {
             return Err(std::io::ErrorKind::WriteZero.into());
@@ -463,7 +668,7 @@ enum SetupJob {
 struct Session {
     stream: usize,
     socket: Socket,
-    origin: Origin,
+    origin: memory::StreamOrigin,
     subscribers: Vec<Subscriber>,
     scratch: Box<[u8]>,
     #[cfg(feature = "local-branches-spike")]
@@ -486,6 +691,7 @@ struct IngressStats {
     domain_class_discards: u64,
     contention_discards: u64,
     no_receiver_discards: u64,
+    memory_policy_discards: u64,
     fatal_discards: u64,
     enqueued: u64,
     skipped: u64,
@@ -515,7 +721,7 @@ impl IngressStats {
         "ingress_rejected_deliveries":self.ingress_rejected,
         "discard_reasons":{"BudgetExceeded":self.budget_discards,"ClassDepleted":self.class_discards,
             "DomainClassDepleted":self.domain_class_discards,
-            "Contended":self.contention_discards,"NoReceivers":self.no_receiver_discards,"Fatal":self.fatal_discards}})
+            "Contended":self.contention_discards,"MemoryPolicy":self.memory_policy_discards,"NoReceivers":self.no_receiver_discards,"Fatal":self.fatal_discards}})
     }
 }
 async fn acquire(
@@ -556,7 +762,18 @@ pub fn server(args: &Args) -> Result<Value> {
 }
 
 async fn connect(port: u16, stream: usize, subscriber: usize) -> Result<TcpStream> {
+    connect_mode(port, stream, subscriber, false).await
+}
+async fn connect_mode(
+    port: u16,
+    stream: usize,
+    subscriber: usize,
+    keyed: bool,
+) -> Result<TcpStream> {
     let mut socket = TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).await?;
+    if keyed {
+        socket.write_all(&WIRE_V2).await?;
+    }
     socket.set_nodelay(true)?;
     socket.write_all(&(stream as u32).to_be_bytes()).await?;
     socket.write_all(&(subscriber as u32).to_be_bytes()).await?;
@@ -574,6 +791,8 @@ struct Consumer {
     terminal: &'static str,
     partial_bytes: usize,
     latency: Latency,
+    max_gap: Duration,
+    last_delivery: Duration,
 }
 impl Consumer {
     fn new(stream: usize, subscriber: usize) -> Self {
@@ -589,13 +808,15 @@ impl Consumer {
             terminal: "reading",
             partial_bytes: 0,
             latency: Latency::default(),
+            max_gap: Duration::ZERO,
+            last_delivery: Duration::ZERO,
         }
     }
     fn json(&self) -> Value {
         json!({"stream":self.stream,"subscriber":self.subscriber,"delivered":self.delivered,
         "bytes":self.bytes,"overdue":self.overdue,"invalid":self.invalid,"cancelled":self.cancelled,"terminal":self.terminal,"partial_bytes":self.partial_bytes,
         "timely_delivered":self.delivered-self.overdue,"expired_delivered":self.overdue,"timely_bytes":self.timely_bytes,
-        "scheduled_arrival_latency":self.latency.json()})
+        "max_delivery_gap_ns":self.max_gap.as_nanos().min(u64::MAX as u128) as u64,"scheduled_arrival_latency":self.latency.json()})
     }
 }
 #[derive(Clone)]
@@ -615,21 +836,34 @@ impl Validation {
         if header.len == 0 || header.len > self.settings.max_payload() {
             return Some("invalid_length");
         }
-        if header.id >= self.planned
-            || loadgen::route(header.id, self.settings.streams, self.skew) != stream
-        {
+        // Validate the untrusted identity before converting its schedule to a
+        // Duration: an out-of-range u64 can overflow the floating-point clock.
+        if header.id >= self.planned {
+            return Some("invalid_identity");
+        }
+        let (expected_stream, sequence, due, _) = loadgen::scheduled(
+            header.id,
+            self.settings.streams,
+            self.skew,
+            &self.settings.arrival_pattern,
+            self.rate,
+        );
+        if expected_stream != stream {
             return Some("invalid_identity");
         }
         if previous.is_some_and(|id| header.id <= id) {
             return Some("invalid_order");
         }
-        if header.due
-            != Duration::from_secs_f64(header.id as f64 / self.rate as f64).as_nanos() as u64
-        {
+        if header.due != due.as_nanos() as u64 {
             return Some("invalid_timestamp");
         }
-        let sequence =
-            loadgen::sequence_before(header.id, stream, self.settings.streams, self.skew);
+
+        if self.settings.keyed()
+            && (header.sequence != Some(sequence)
+                || header.keyframe != sequence.is_multiple_of(self.settings.keyframe_interval))
+        {
+            return Some("invalid_dependency_metadata");
+        }
         if header.len != self.settings.payload_size(stream, sequence) {
             return Some("invalid_length");
         }
@@ -647,10 +881,15 @@ async fn consume(
     validation: Validation,
 ) -> Consumer {
     let mut previous = None;
+    let mut previous_sequence: Option<u64> = None;
     loop {
-        let mut bytes = [0; HEADER];
+        let mut bytes = [0; HEADER_V2];
         let mut prefix = 0;
-        let read = payload::read_prefix(&mut socket, &mut bytes, &mut prefix);
+        let read = payload::read_prefix(
+            &mut socket,
+            &mut bytes[..validation.settings.header_len()],
+            &mut prefix,
+        );
         match tokio::time::timeout_at(deadline, read).await {
             Ok(Ok(true)) => (),
             result => {
@@ -671,11 +910,24 @@ async fn consume(
                 break;
             }
         }
-        let header = Header {
-            len: u32::from_be_bytes(bytes[..4].try_into().unwrap()) as usize,
-            id: u64::from_be_bytes(bytes[4..12].try_into().unwrap()),
-            due: u64::from_be_bytes(bytes[12..].try_into().unwrap()),
+        let header = match Header::decode(&bytes[..validation.settings.header_len()]) {
+            Ok(h) => h,
+            Err(_) => {
+                stats.invalid += 1;
+                stats.terminal = "invalid_header";
+                break;
+            }
         };
+        if let Some(seq) = header.sequence {
+            let ordered = previous_sequence.is_none_or(|old| seq > old);
+            let contiguous = previous_sequence.and_then(|old| old.checked_add(1)) == Some(seq);
+            if !ordered || (!contiguous && !header.keyframe) {
+                stats.invalid += 1;
+                stats.terminal = "invalid_dependency";
+                break;
+            }
+            previous_sequence = Some(seq);
+        }
         if let Some(reason) = validation.header_error(header, stats.stream, previous) {
             stats.invalid += 1;
             stats.terminal = reason;
@@ -718,6 +970,11 @@ async fn consume(
         let latency = start
             .elapsed()
             .saturating_sub(Duration::from_nanos(header.due));
+        let delivered_at = start.elapsed().min(validation.settings.seconds);
+        stats.max_gap = stats
+            .max_gap
+            .max(delivered_at.saturating_sub(stats.last_delivery));
+        stats.last_delivery = delivered_at;
         stats.delivered += 1;
         stats.bytes += header.len as u64;
         let expired = validation
@@ -729,6 +986,29 @@ async fn consume(
             stats.timely_bytes += header.len as u64;
         }
         stats.latency.record(latency);
+        let elapsed = start.elapsed();
+        let slow = if slow.is_zero() {
+            slow
+        } else {
+            match validation.settings.slow_pattern {
+                SlowPattern::Constant => slow,
+                SlowPattern::Pause => {
+                    if (Duration::from_secs(2)..Duration::from_millis(2100)).contains(&elapsed) {
+                        Duration::from_millis(2100).saturating_sub(elapsed)
+                    } else {
+                        Duration::ZERO
+                    }
+                }
+                SlowPattern::StopResume => {
+                    if (Duration::from_secs(2)..Duration::from_secs(3)).contains(&elapsed) {
+                        Duration::from_secs(3).saturating_sub(elapsed)
+                    } else {
+                        Duration::ZERO
+                    }
+                }
+                SlowPattern::Ramp => slow.mul_f64((elapsed.as_secs_f64() / 5.0).min(1.0)),
+            }
+        };
         if !slow.is_zero()
             && tokio::time::timeout_at(deadline, tokio::time::sleep(slow))
                 .await
@@ -739,6 +1019,12 @@ async fn consume(
             break;
         }
     }
+    stats.max_gap = stats.max_gap.max(
+        validation
+            .settings
+            .seconds
+            .saturating_sub(stats.last_delivery),
+    );
     stats // preserve complete samples and the terminal partial-frame observation
 }
 
@@ -805,9 +1091,18 @@ mod tests {
         let len = settings.payload_size(0, 0);
         let mut data = vec![0; len];
         payload::fill_payload(&mut data, settings.seed, 0, 0);
-        write_frame(&mut sender, Header { len, id: 0, due: 0 }, &data)
-            .await
-            .unwrap();
+        write_frame(
+            &mut sender,
+            Header {
+                len,
+                id: 0,
+                due: 0,
+                ..Header::default()
+            },
+            &data,
+        )
+        .await
+        .unwrap();
         sender.shutdown().await.unwrap();
         let result = consume(
             socket,
@@ -853,15 +1148,25 @@ mod tests {
         let mut data = vec![0; len];
         payload::fill_payload(&mut data, settings.seed, 0, 0);
         let writer = tokio::spawn(async move {
-            write_frame(&mut sender, Header { len, id: 0, due: 0 }, &data)
-                .await
-                .unwrap();
+            write_frame(
+                &mut sender,
+                Header {
+                    len,
+                    id: 0,
+                    due: 0,
+                    ..Header::default()
+                },
+                &data,
+            )
+            .await
+            .unwrap();
             sender
                 .write_all(
                     &Header {
                         len: next_len,
                         id: 1,
                         due: 1_000_000,
+                        ..Header::default()
                     }
                     .encode(),
                 )

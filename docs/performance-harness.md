@@ -144,3 +144,82 @@ Scalar fan-out remains the default. Compare scalar, batch, borrowed and local
 families at equivalent offered work, retaining contention and partially served
 frames. Primitive wins do not establish a TCP win. Useful no-drop results always
 name the load, capacity, consumer behavior and deadlines; overload remains explicit.
+
+## Adapter hot-path experiments (AP-12)
+
+`spike_probe --case=adapter --backend=mosaic --return=local
+--queue-backend=local --queue=32 --iterations=200000` measures the complete
+prepared admission/fill/freeze/enqueue/transfer/drop cycle. It samples every
+64th cycle and reports layouts, including the concrete writer future. Those
+figures include observer overhead; they are neither an isolated allocator cost
+nor TCP delivery latency. Select adaptive explicitly with the existing freshness
+options. `spike_alloc --case=staged-ingress --iterations=10000` checks the actual
+ready-source copy/reuse path, separately from sockets and runtime setup.
+
+TCP ingress remains `initialized` by default. `--ingress=read-buf` writes directly
+to a bounded lease cursor. The explicit `--ingress=staged-copy` experiment prefetches
+into the existing prepared scratch and copies admitted payload prefixes. Only
+that mode accepts `--ingress-buffer-bytes=1..16384`; the default is 1500 bytes for
+packets and 16384 for frame profiles. Prefetch can include later wire frames but
+cannot reserve their queue or arena rights. Skip consumes exactly one payload.
+
+`--external-memory-limit-bytes=N` rejects a typed plan whose selected external
+storage model exceeds N, before server resources. The projection includes scratch,
+queue entries/controller state, mailbox entries, semaphore objects, writer
+messages/headers/timestamps/descriptors and timers. It excludes complete runtime
+and task overhead, allocation rounding and socket buffers; it is not an RSS bound.
+The experimental comparison limits growth of this same model to 5% at unchanged
+arena layout. Larger scratch is not automatically eligible just because the CLI
+accepts its size.
+
+Each worker reports `writer_aborted` by deadline, policy, I/O, cancellation and
+unwind. Empty completed batches add no abort-counter RMW. For local queues the
+validator requires `enqueued = writer_completed + freshness_evicted +
+cancelled_queued + writer_aborted`. A completed socket write still need not be a
+consumer delivery. Remote Tokio queues and historical records retain their
+explicit unclassified residual; no missing outcome is reclassified as success.
+All workers in one report must use the same abort schema. A mixture of missing
+and present fields is invalid, including on writer-only workers.
+
+`scripts/hotpath-review.py` compares source-qualified prebuilt server binaries,
+with a current load generator, rotating order across repetitions. Its shortlist
+compares initialized, direct ReadBuf and staged-copy; `--suite=final` adds slow
+consumer shapes and mixed frames with separate keyed runs. Preflight compares
+arena reservation, class capacity and domain/grant plans for every variant against
+the original before starting the timing campaign. Build in separate
+Cargo target directories for distinct source trees: package fingerprints can
+otherwise leave an executable overwritten by another checkout. Mutation trees
+must never share a target with verification or benchmark builds. Check executable
+capabilities as well as source and binary digests before accepting a campaign.
+
+The [experiment report](reports/2026-10-19/hot-path-experiments.md) distinguishes
+retained adapters, rejected candidates, instrumented traces and native timing.
+
+## Memory shortcuts
+
+`scripts/memory-shortcuts.py` accepts source-qualified prebuilt baseline,
+candidate and optional LTO records. It refuses non-tmpfs output, source/binary
+drift, empty measurements and missing charge/teardown conservation. The serial
+suite compares fresh, parked and borrowed-frame paths with the same live working
+set. Policy cycles use the actual Bank; `full` and `cached` remain separate.
+TCP uses the baseline release load generator for every server variant, checks
+identical resource plans and retains all offered-load losses. Process CPU uses
+the last nonzero cumulative observation, not the vanished process's terminal zero.
+
+Build records have schema 1, status `passed`, `source_root`, `source_sha256` from
+that snapshot's `scripts/verify.py`, `profile`, resolved `features`, `rustc`, and
+`binaries` mapping names to absolute `path` and `sha256`. Create a fresh output
+directory for every campaign. Example:
+
+```sh
+python3 scripts/memory-shortcuts.py --suite=all \
+  --baseline-record=/tmp/lab/baseline.json \
+  --candidate-record=/tmp/lab/candidate.json --lto-record=/tmp/lab/lto.json \
+  --output=/tmp/lab/comparison --repeats=7 --seconds=15
+```
+
+`cargo build --profile perf-lto` explicitly selects thin LTO with one codegen unit.
+Ordinary release/default features are unchanged. A consuming application's final
+executable profile controls cross-crate optimization; a library profile alone
+does not establish downstream performance. The [report](reports/2026-10-23/memory-shortcuts.md)
+distinguishes primitive throughput, instrumented allocation checks and TCP delivery.

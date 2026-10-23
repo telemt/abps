@@ -401,3 +401,176 @@ These transitions introduce no allocator atomic or unsafe changes. They are loca
 ownership tests, not a new Loom proof. Core Loom evidence retains its existing
 scope. The fixed-arena profile deliberately reports envelope deficits rather than
 claiming availability. See [delivery profiles](docs/fixed-arena-delivery.md).
+
+### Adaptive queue and dependency epochs (AP-11)
+
+The adapter controller is safe worker-local code, stored in the prepared queue.
+W is a target, not a replacement for physical queue credits. `maintain` removes at
+most eight entries, installs a Releasing guard, then drops payload outside the
+RefCell borrow. ReplacementAttempt accounts for irreversible eviction on unwind;
+the reservation guard takes over that responsibility on success. Existing permits
+may commit above a contracted W, but never above Q.
+
+Dependency loss advances a checked recovery generation. Both commit and reservation
+rollback compare the captured generation: an obsolete right can release itself,
+but cannot put a newer Streaming generation back into AwaitKeyframe. Recovery
+requires old-queue cleanup and actual keyframe commit. Writer ownership predates
+the gap and cannot be revoked. Closing preserves the first terminal reason.
+
+The `adaptive-freshness-conservation` registry selects `ap11_` controller, wire,
+configuration, independent rights history, bounded pruning, source-gap ingress,
+stale-commit, unwind, deadline and actual Mosaic writer-stall regressions. The
+history uses 1024 steps per capacity natively and 64 under Miri. Tests cover the
+same guarded transitions used by the adapter, including complete release after a
+partial wire prefix. No allocator unsafe or atomic transition changes; these are
+not additional Loom models. Performance and sanitizer claims belong to the
+source-qualified execution report, not to test discovery.
+
+### Bounded ingress staging and writer outcomes (AP-12)
+
+The optional staged-copy reader owns the already prepared scratch allocation.
+Its initialized interval is `[start, end)` with `start <= end <= capacity`.
+Refill occurs only when that interval is empty; reading a header or skipping a
+payload advances by exactly the consumed wire length. Prefetched bytes confer no
+queue, domain or slot rights. The ingress still acquires queue permits before
+payload admission. A successful copy initializes only that lease prefix; partial
+EOF or cancellation cannot expose old payload bytes or replay the next header.
+The scratch size and selected external storage ceiling are checked before server
+resources. This model excludes full task/runtime allocation and OS RSS.
+
+The writer Batch guard records remaining frames on error, cancellation or unwind.
+Completed frames leave the guard before payload destruction. Local queue drain
+has the independent equation `enqueued = completed + evicted + queued_cancelled
++ batch_aborted`; transport completion still differs from consumer receipt.
+Remote Tokio queue cancellation retains a separately reported unclassified residual;
+it is not inferred from I/O errors or hidden in completed deliveries. Legacy
+records without batch outcomes remain explicitly incomplete in that breakdown.
+
+The `hotpath-adapter-conservation` registry selects `ap12_` deterministic tests of
+split/concatenated headers, exact Skip, short input, cancellation, prepared-size
+boundaries, read coalescing and unwind accounting. Existing writer deadline and
+partial-write tests remain applicable. These are safe adapter transitions; core
+unsafe and synchronization protocols are unchanged. Disposable ring/dispatch
+experiments are outside this safety case and cannot inherit these results.
+
+
+### Adaptive memory generations (AP-13)
+
+The experimental TCP adapter uses only safe public Mosaic APIs. Root/control
+handles remain behind an issuer-local `Rc<RefCell<_>>`; ordinary Mosaic buffers
+cross lifetime boundaries without adapter release hooks. No core synchronization,
+unsafe transition or immutable hard limit changes.
+
+`memory::Bank` observes all generations before synchronous policy check and one
+core acquisition. No other issuer operation or await occurs in that interval;
+refund-only concurrent activity makes the observation conservative. A soft target
+is permission for future admission, never ownership or a forced-reclaim right.
+Root records charge full `Reservation::total_bytes` before prepare and keep charge
+through partial prepare, drain, abandonment and diagnostic release. Old controls
+remain until owner-side drain; `try_destroy()` is the final independent authority.
+Frame input retains its acquired buffer, so a later route change cannot move its
+origin. Root record generations never wrap; no remote generation-completion
+messages exist in this prototype.
+Strict preflight checks the selected initial active slot/grant envelope after
+layout selection and rounding; it cannot inherit the original root's coverage.
+
+The `adaptive-memory-conservation` registry selects `ap13_` checks of cross-root
+hard limits, view/backing separation, soft contraction, preparation errors/unwind,
+old-generation payload survival, capped weighted allocation, offered-demand
+recovery and burst marginals. An independent rights oracle counts unique live
+allocation IDs and compares their full charges after each trace step. Replay
+collections are a research driver, not an exception for the adapter hot path.
+Existing production-protocol Loom models remain the ordering evidence: this
+adapter adds no atomic protocol. Native, Miri and sanitizer evidence must be
+qualified by the source actually executed; see the dated research report.
+
+### Shared soft opportunity (AP-14)
+
+`memory::shared` is a safe scheduling layer for one Unreserved Mosaic root.
+Its shared-total check covers the full prospective backing charge independently
+of per-stream hard limits. Soft target debt never changes a core charge or grant.
+Pressure and offered/eligible estimates select future admissions, not ownership.
+Under pressure a whole-slot crossing is allowed only from below both targets;
+the global ceiling still applies. Pressure expiry is a coarse maintenance-time
+observation and is not an availability or fairness guarantee.
+
+The issuer-local accounting cache contains only upper bounds. All managed
+admissions pass through Bank; no await or callback can add an unrecorded charge.
+`Pending` charges the cache before the one core attempt, rolls back on error and
+unwind, and commits before the buffer escapes. Actual remote refunds can only
+decrease real ledgers, so stale cache values remain conservative. A refresh borrows
+ordinary live domain controls and lowers estimates from real ledgers. It cannot
+free storage or publish a slot. Error-path refresh is bounded to one pass.
+
+The `shared-memory-conservation` registry includes an independent owner/charge
+model, full/cached trace comparison, fractional-target progress, shared ceiling,
+remote last-owner reuse, and guarded failures before/after core acquisition.
+The paused-refund accounting test is explicitly a controlled observation model;
+existing production-protocol Loom models supply publication-ordering evidence.
+Directed controls remove the total check and undercharge the cache; both must
+fail named detectors in disposable sources. No new unsafe or atomic transition
+is introduced. Actual native/Miri/sanitizer runs and performance evidence remain
+source-qualified in the research report.
+
+### Reusing admission observations and serial backing (AP-14/15)
+
+A successful cached AP-14 decision can be reused only in the same synchronous
+issuer operation with unchanged stream, charge, targets, limits and cache. A
+refresh invalidates that decision; full accounting refreshes before its single
+check. Concurrent refunds cannot increase the real ledgers. The existing pending
+charge guard and one core acquisition remain the authorities. Test-only check
+counters detect duplicate checks and missing refreshes without production overhead.
+
+The optional `serial` module forbids unsafe code and owns an ordinary Mosaic
+`BufMut`. `SerialWrite` and `SerialFrame` exclusively borrow that allocation;
+neither carries a separate reference or refund right. Consuming the write guard
+takes its borrow before constructing the frame, leaving its destructor inert.
+The frame exposes only slices tied to its own borrow. The compiler prevents a
+second write while the frame or one of its slices remains live. Guard destruction
+clears filled length; `begin()` independently clears it, including after a
+forgotten guard. Clearing to zero is valid in every safe `BufMut` state.
+
+Initialized length belongs to the retained lease and can reveal bytes from an
+earlier frame through explicit initialization access. This is documented reuse,
+not a new allocation with zero initialized length. Full backing charge and origin
+persist while idle. Domain close does not revoke this existing mutable right;
+the caller terminates its serial loop and drops or transfers the buffer. Only
+ordinary Mosaic final return refunds the allocation. No new atomic or unsafe
+transition is introduced and no new Loom model is claimed.
+
+The `serial-reuse` registry selects deterministic error, unwind, forgotten guard,
+payload/canary, partial I/O/cancellation, remote return and independent trace
+tests. Compile-fail examples prevent escaping frame bytes and overlapping writes;
+trait checks retain Send / !Sync / !Clone. Native and Miri runs qualify these
+actual tests. The allocation probe includes a positive control and checks prepared
+serial operations; runtime/socket allocations are outside that claim. See the
+[implementation report](docs/reports/2026-10-23/memory-shortcuts.md) for evidence.
+
+### Admission dynamics (AP-16)
+
+Delivery accounting commits preflight loss decisions only after a complete payload
+has been consumed or drained. Unread expiry and partial input remain header/I/O
+observations; they do not invent received frames or recipient rights. The partial
+payload, partial discard and unread-expiry regressions assert the complete-frame
+conservation equations as well as actual memory and pacing-credit cleanup.
+
+The research adapter is safe and issuer-local. Pacing credits do not represent
+slot ownership, ledger credit or lifetime claims. A registration guard removes
+only its current generation; failed/unwinding admission restores provisional rate
+credit. A successful acquisition permanently spends it. Delayed completion does
+not bank refill for an immediate second burst. The ordinary core and its actual
+Loom publication/refund models are unchanged.
+
+The independent all-interval charge oracle, FIFO/expiry/generation tests, real
+100-recipient fan-out, pending-header cancellation and partial-payload regressions
+are in `examples/spike_support/network/admission/`. The Engine allocation probe
+has an allocation/free positive control. It does not certify runtime timer/socket
+allocation behavior. The driver emits at most eight signals per pass; deadline
+selection/removal examines at most the prepared 64 stream records. No new unsafe
+transition or lock-free implementation is introduced.
+
+Evidence interpretation: tick-cap is a fixed-window control, not a continuous
+bucket; callbacks are private synchronous adapter operations. Instrumented native
+snapshots are observations, not coherent conservation snapshots. The replay oracle
+checks exact admitted charge only without concurrent returns. Native teardown is
+checked after all returners join, independently of timing evidence.

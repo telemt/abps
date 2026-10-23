@@ -14,6 +14,19 @@ fn validation() -> Validation {
         skew: false,
     }
 }
+
+#[test]
+fn abps_consumer_rejects_extreme_identity_before_schedule_conversion() {
+    let mut v = validation();
+    v.rate = 1;
+    let header = Header {
+        id: u64::MAX,
+        len: 1,
+        ..Header::default()
+    };
+    assert_eq!(v.header_error(header, 0, None), Some("invalid_identity"));
+}
+
 fn frame(v: &Validation, id: u64) -> Vec<u8> {
     let len = v
         .settings
@@ -22,6 +35,7 @@ fn frame(v: &Validation, id: u64) -> Vec<u8> {
         len,
         id,
         due: Duration::from_secs_f64(id as f64 / v.rate as f64).as_nanos() as u64,
+        ..Header::default()
     }
     .encode()
     .to_vec();

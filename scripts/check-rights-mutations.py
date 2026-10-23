@@ -61,6 +61,14 @@ def cases():
             (backend+"-generation-relaxed-final-load-acquire-load", protocol, "let _ = self.0.load(Ordering::Acquire);", "let _ = self.0.load(Ordering::Relaxed);", loom, generation),
         ])
     result.extend([
+        ("shared-soft-total-bypass", "examples/spike_support/network/memory/shared.rs",
+         ".is_none_or(|v| v > p.total)", ".is_none_or(|_| false)",
+         ["--features", FULL, "--example", "spike_probe"],
+         "spike_support::network::memory::shared::tests::ap14_global_cap_rejects_when_each_hard_limit_still_has_space"),
+        ("shared-cache-undercharge", "examples/spike_support/network/memory/shared.rs",
+         "self.streams[stream] = s;", "self.streams[stream] = s - charge;",
+         ["--features", FULL, "--example", "spike_probe"],
+         "spike_support::network::memory::shared::tests::ap14_independent_rights_model_bounds_cached_admission"),
         ("mosaic-root-skip-last-domain", "src/mosaic/protocol.rs", "ledgers.all(DomainLedger::drained)", "ledgers.take(2).all(DomainLedger::drained)",
          ["--features","local-branches-spike,loom-model","--lib"], "mosaic::protocol::tests::si11_root_drain_covers_last_domain_and_all_refunds_without_join"),
         ("mosaic-lost-free-node-count", "src/mosaic/raw.rs", "root.free_nodes.set(root.free_nodes.get() - 1);", "root.free_nodes.set(root.free_nodes.get());",

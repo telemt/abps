@@ -31,9 +31,9 @@ def tcp_profile(backend, queue, mode='scalar'):
 def fixed_arena_profile(queue=32, *, local=False, queue_backend='tokio', freshness='off', min_age=0):
     """AP-10: queue descriptors never scale physical capacity or byte admission."""
     if queue not in (8,32,64): raise ValueError('fixed-arena queue must be 8,32,64')
-    if queue_backend not in ('tokio','local') or freshness not in ('off','oldest'):
+    if queue_backend not in ('tokio','local') or freshness not in ('off','oldest','adaptive'):
         raise ValueError('unsupported queue/freshness policy')
-    if queue_backend=='local' and not local or freshness=='oldest' and queue_backend!='local':
+    if queue_backend=='local' and not local or freshness in ('oldest','adaptive') and queue_backend!='local':
         raise ValueError('local queue and oldest require local routing')
     if not 0<=min_age<=3600000: raise ValueError('invalid freshness age')
     p=tcp_profile('mosaic',8)
@@ -46,7 +46,7 @@ def fixed_arena_profile(queue=32, *, local=False, queue_backend='tokio', freshne
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--suite',choices=['diagnostics','fanout','tcp','fixed-arena'],required=True)
+    p.add_argument('--suite',choices=['diagnostics','fanout','tcp','fixed-arena','adaptive'],required=True)
     p.add_argument('--output',type=Path,required=True)
     p.add_argument('--target',type=Path,default=Path('target'))
     p.add_argument('--build-record',type=Path)
@@ -87,6 +87,16 @@ def main():
                         for api in ['fanout','fanout_batch','borrowed']:
                             jobs.append((f'fanout-{backend}-{api}-{size}-{fanout}',dict(backend=backend,op=api,size=size,
                                 fanout=fanout,seconds=args.seconds,warmup=.15)))
+        elif args.suite=='adaptive':
+            profiles=[(name,fixed_arena_profile(local=True,queue_backend='local',freshness=name)) for name in ['off','oldest','adaptive']]
+            profiles.append(('keyframe',dict(fixed_arena_profile(local=True,queue_backend='local',freshness='adaptive'),**{'frame-dependencies':'keyframe'})))
+            for name,profile in profiles:
+                for pattern in ['healthy','pause','constant','ramp','stop-resume']:
+                    options=dict(profile,rate=20000,seconds=args.seconds)
+                    if pattern!='healthy':options.update(slow='yes',**{'slow-profile':pattern,'send-buffer-bytes':4096})
+                    jobs.append((f'adaptive-{name}-{pattern}',options))
+                jobs.append((f'adaptive-{name}-mixed',dict(profile,rate=200,seconds=args.seconds,
+                    distribution='mixed-frames',**{'domain-limit-bytes':136314880,'keyframe-burst':4})))
         elif args.suite=='fixed-arena':
             profiles=[(f'remote-q{q}',fixed_arena_profile(q)) for q in [8,32,64]]
             profiles += [('local-tokio',fixed_arena_profile(local=True)),
@@ -109,6 +119,6 @@ def main():
                     jobs.append((f'tcp-common-{backend}-{mode}',dict(profile,rate=1000,seconds=args.seconds)))
         if trial%2:jobs.reverse()
         for key,options in jobs:
-            (runner.tcp if args.suite in ('tcp','fixed-arena') else runner.run)(key,options,trial)
+            (runner.tcp if args.suite in ('tcp','fixed-arena','adaptive') else runner.run)(key,options,trial)
 
 if __name__=='__main__':main()

@@ -135,16 +135,40 @@ def validate_issuer_flow(server, client):
             require(count(m,'occupancy_high_water',path)<=capacity,path,"occupancy exceeded capacity")
             require(count(m,'prepared_capacity',path)>=capacity,path,"unprepared queue storage")
             for k in ('storage_model_bytes','rejected_full','queue_age_samples','queue_age_max_ns'):count(m,k,path)
+            if server['pipeline_plan'].get('freshness_priority')=='adaptive':
+                a=field(m,'adaptive',path)
+                require(1<=count(a,'window',path)<=capacity,path,'invalid adaptive window')
+                require(count(a,'pressure_q16',path)<=65536,path,'invalid pressure')
+                equal(sum(count(a,k,path) for k in ('age_evictions','window_evictions','dependency_evictions')),m['evicted'],path+'.eviction_reasons')
+                for k in ('debt_ms','dependency_skips','policy_rejections','stale_commits','recovery_generation'):count(a,k,path)
+                require(a['state'] in ('streaming','await_keyframe','closing'),path,'invalid controller state')
+                require(a['disconnect_reason'] in (None,'sustained_pressure','write_stall','keyframe_timeout','frame_deadline','recovery_generation_exhausted'),path,'invalid disconnect reason')
             evicted+=m['evicted'];replacements+=m['failed_replacements'];queue_cancelled+=m['cancelled'];enqueued+=m['enqueued']
         equal(enqueued,sums['enqueued'],'local_queues.enqueued')
         require(evicted+queue_cancelled<=enqueued-written,'local_queues.losses','losses exceed uncompleted enqueued')
         if server['pipeline_plan'].get('freshness_priority')=='off':equal(evicted,0,'local_queues.fifo_evictions')
+    # Legacy binaries lack batch outcomes. Retain their residual explicitly.
+    aborted = 0
+    reported = sum("writer_aborted" in w for w in workers)
+    require(reported in (0, len(workers)), "writer_aborted", "mixed writer abort schemas")
+    classified = reported == len(workers)
+    if classified:
+        for w in workers:
+            reasons = field(w, "writer_aborted", "worker")
+            aborted += sum(count(reasons, k, "writer_aborted") for k in
+                           ("deadline", "policy", "io", "cancel", "unwind"))
+    residual = sums["enqueued"] - written - evicted - queue_cancelled - aborted
+    require(residual >= 0, "writer_aborted", "duplicate loss accounting")
+    # Local queues observe their own cancellation; remote Tokio queues do not.
+    if classified and server.get("pipeline_plan", {}).get("queue_backend") == "local":
+        equal(residual, 0, "flow.classified_local_losses")
     seconds = field(client, "measurement_seconds", "loadgen")
     require(type(seconds) in (int, float) and math.isfinite(seconds) and seconds > 0, "loadgen.measurement_seconds", "positive finite duration required")
     planned = n["planned"] * fanout
     return dict(sums, writer_completed=written, delivered=delivered,
                 freshness_evicted=evicted, failed_replacements=replacements, cancelled_queued=queue_cancelled,
-                unclassified_uncompleted_enqueued=sums["enqueued"]-written-evicted-queue_cancelled,
+                writer_aborted=aborted, writer_abort_classification=classified,
+                unclassified_uncompleted_enqueued=residual,
                 uncompleted_enqueued=sums["enqueued"] - written,
                 unobserved_completed=written - delivered,
                 undelivered_enqueued=sums["enqueued"] - delivered,

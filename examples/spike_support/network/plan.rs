@@ -29,9 +29,13 @@ pub(super) struct RootPlan {
     semaphore_storage: usize,
     descriptors: usize,
     upper_bytes: usize,
+    writer_storage: usize,
+    external_bytes: usize,
 }
 pub(super) struct PipelinePlan {
     pub roots: Vec<RootPlan>,
+    #[cfg(feature = "mosaic-spike")]
+    pub memory: Option<memory::Plan>,
     settings: Settings,
     shared: bool,
 }
@@ -175,7 +179,7 @@ impl PipelinePlan {
                 metadata_bytes,
                 metadata_is_modeled,
                 backing_is_modeled: backend == "bytes",
-                scratch_bytes: mul(streams.len(), s.max_payload().min(16 * 1024))?,
+                scratch_bytes: mul(streams.len(), s.scratch_bytes())?,
                 queue_storage: if s.local_queue {
                     mul(
                         writers,
@@ -215,10 +219,93 @@ impl PipelinePlan {
                 },
                 descriptors: mul(writers, mul(16, std::mem::size_of::<IoSlice<'_>>())?)?,
                 upper_bytes: mul(root_envelope, s.max_class())?,
+                writer_storage: mul(
+                    writers,
+                    add(
+                        mul(
+                            8,
+                            add(
+                                std::mem::size_of::<Option<Message<WriterFrame>>>(),
+                                add(
+                                    HEADER_V2,
+                                    std::mem::size_of::<Option<tokio::time::Instant>>(),
+                                )?,
+                            )?,
+                        )?,
+                        add(
+                            std::mem::size_of::<tokio::time::Sleep>(),
+                            if s.adaptive.is_some() {
+                                std::mem::size_of::<tokio::time::Interval>()
+                            } else {
+                                0
+                            },
+                        )?,
+                    )?,
+                )?,
+                external_bytes: 0,
             });
+        }
+        let mut external_total = 0;
+        for r in &mut plans {
+            r.external_bytes = [
+                r.scratch_bytes,
+                r.queue_storage,
+                r.mailbox_storage,
+                r.semaphore_storage,
+                r.descriptors,
+                r.writer_storage,
+            ]
+            .into_iter()
+            .try_fold(0, add)?;
+            external_total = add(external_total, r.external_bytes)?;
+        }
+        #[cfg(feature = "mosaic-spike")]
+        let memory = if s.memory.is_some() {
+            Some(memory::Plan::new(
+                s,
+                &plans[0],
+                external_total,
+                plans[0].domains.iter().map(|d| d.limit).collect(),
+            )?)
+        } else {
+            None
+        };
+        #[cfg(feature = "mosaic-spike")]
+        if let Some(p) = &memory {
+            if s.require_envelope {
+                for class in &p.config.classes {
+                    let covered = match s.capacity_policy {
+                        CapacityPolicy::Unreserved => {
+                            mul(class.slots, p.initial)? >= plans[0].envelope
+                        }
+                        CapacityPolicy::Reserved => {
+                            let own = mul(class.slots / s.streams, p.initial)?;
+                            plans[0].domains.iter().all(|d| own >= d.envelope)
+                        }
+                    };
+                    if !covered {
+                        return Err(format!(
+                            "selected memory topology cannot cover class {} envelope",
+                            class.capacity
+                        )
+                        .into());
+                    }
+                }
+            }
+            external_total = add(external_total, p.extra_external)?;
+        }
+        if s.external_memory_limit
+            .is_some_and(|limit| external_total > limit)
+        {
+            return Err(format!(
+                "external storage model {external_total} exceeds configured ceiling"
+            )
+            .into());
         }
         Ok(Self {
             roots: plans,
+            #[cfg(feature = "mosaic-spike")]
+            memory,
             settings: s.clone(),
             shared,
         })
@@ -237,6 +324,11 @@ impl PipelinePlan {
         &self.roots[root].domains[rank]
     }
     pub fn json(&self) -> Value {
+        #[cfg(feature = "mosaic-spike")]
+        let memory = self.memory.as_ref().map(memory::Plan::json);
+        #[cfg(not(feature = "mosaic-spike"))]
+        let memory: Option<Value> = None;
+
         let s = &self.settings;
         let roots: Vec<_> = self.roots.iter().enumerate().map(|(index, r)| {
             let classes: Vec<_> = r.classes.iter().map(|c| json!({
@@ -256,20 +348,20 @@ impl PipelinePlan {
                 "transform_output_headroom_slots":0,"queued_upper_backings":r.queued,
                 "writer_upper_backings":r.in_flight,"simultaneous_upper_backings":r.envelope,
                 "upper_backing_bytes_at_max_class":r.upper_bytes,"scratch_bytes":r.scratch_bytes,
-                "queue_item_storage_model_bytes":r.queue_storage,
+                "queue_item_storage_model_bytes":r.queue_storage,"writer_storage_model_bytes":r.writer_storage,"external_storage_model_bytes":r.external_bytes,
                 "mailbox_item_storage_model_bytes":r.mailbox_storage,"semaphore_storage_model_bytes":r.semaphore_storage,"writer_descriptors_model_bytes":r.descriptors,
                 "reservation_bytes":r.reservation_bytes,"writers":r.writers,"configured_backing_bytes":r.backing_bytes,"backing_is_modeled":r.backing_is_modeled,"metadata_bytes":r.metadata_bytes,
                 "metadata_is_modeled":r.metadata_is_modeled})
         }).collect();
-        json!({"queue_backend":if s.local_queue {"local"} else {"tokio"},"freshness_priority":if s.freshness_min_age.is_some() {"oldest"} else {"off"},"freshness_min_age_ms":s.freshness_min_age.map(|v|v.as_millis()),"roots":roots,"class_slots":s.class_slots,"class_capacities":s.class_capacities,"distribution":s.distribution,"write_batch":s.write_batch,
+        json!({"memory":memory,"baseline_external_storage_model_bytes":self.roots.iter().map(|r|r.external_bytes).sum::<usize>(),"external_storage_model_bytes":self.roots.iter().map(|r|r.external_bytes).sum::<usize>()+memory.as_ref().and_then(|m|m["extra_external_bytes"].as_u64()).unwrap_or(0) as usize,"external_memory_limit_bytes":s.external_memory_limit,"ingress_buffer_bytes":s.scratch_bytes(),"queue_backend":if s.local_queue {"local"} else {"tokio"},"freshness_priority":if s.adaptive.is_some() {"adaptive"} else if s.freshness_min_age.is_some() {"oldest"} else {"off"},"freshness_min_age_ms":s.freshness_min_age.map(|v|v.as_millis()),"adaptive":s.adaptive.map(|p|json!({"target_ms":p.target.as_millis(),"grace_ms":p.grace.as_millis(),"stall_ms":p.stall.as_millis(),"keyframe_wait_ms":p.key_wait.as_millis(),"keyed":p.keyed})),"wire_version":if s.keyed(){2}else{1},"adaptive_timer_model_bytes":if s.adaptive.is_some(){std::mem::size_of::<tokio::time::Interval>()*s.streams*s.fanout}else{0},"roots":roots,"class_slots":s.class_slots,"class_capacities":s.class_capacities,"distribution":s.distribution,"write_batch":s.write_batch,
             "capacity_check":if s.require_envelope {"require-envelope"} else {"report"},
             "fanout_api":if s.worker_branches {"worker-branches"} else if s.local_branches {"local-branches"} else if s.batch_fanout {"batch"} else {"scalar"},
             "capacity_policy":format!("{:?}",s.capacity_policy),"max_frame_age_ms":s.max_frame_age.map(|a|a.as_millis()),
-            "send_buffer_bytes_requested":s.send_buffer_bytes,"ingress":if s.read_buf {"read-buf"} else {"initialized"},
+            "send_buffer_bytes_requested":s.send_buffer_bytes,"ingress":s.ingress_name(),
             "mailbox_is_subset_of_queue_credits":s.worker_branches,
             "mailbox_capacity_per_stream":if s.worker_branches {s.fanout*s.queue} else {0},
             "availability_guaranteed":false,"bounds_are_conservative":true,"occupancy_includes_pending_returns":true,
-            "external_overhead":"Tokio tasks/channels, allocator overhead and socket buffers are outside the item storage model"})
+            "external_overhead":"Full future/task/channel overhead, allocator rounding and socket buffers are outside the selected external storage model"})
     }
 }
 
@@ -312,6 +404,43 @@ mod tests {
             s.class_slots[0] += 1;
             s.domain_limit = Some(budget - 1);
             assert!(PipelinePlan::new(&s, false, backend).is_err());
+        }
+    }
+    #[test]
+    fn ap12_external_ceiling_and_scratch_are_checked_before_preparation() {
+        let mut s = settings(&[("fanout", "1"), ("ingress", "staged-copy")]);
+        let base = PipelinePlan::new(&s, false, "berry").unwrap();
+        let bytes = base.json()["external_storage_model_bytes"]
+            .as_u64()
+            .unwrap() as usize;
+        assert_eq!(base.roots[0].scratch_bytes, 1500);
+        s.external_memory_limit = Some(bytes);
+        assert!(PipelinePlan::new(&s, false, "berry").is_ok());
+        s.external_memory_limit = Some(bytes - 1);
+        assert!(PipelinePlan::new(&s, false, "berry").is_err());
+        s.external_memory_limit = None;
+        s.ingress_buffer_bytes = Some(2048);
+        assert_eq!(
+            PipelinePlan::new(&s, false, "berry").unwrap().json()["external_storage_model_bytes"],
+            bytes + 548
+        );
+        for pairs in [
+            vec![("ingress-buffer-bytes", "1")],
+            vec![("ingress", "staged-copy"), ("ingress-buffer-bytes", "0")],
+            vec![
+                ("ingress", "staged-copy"),
+                ("ingress-buffer-bytes", "16385"),
+            ],
+        ] {
+            assert!(
+                Settings::new(&Args(
+                    pairs
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v.into()))
+                        .collect()
+                ))
+                .is_err()
+            );
         }
     }
     #[test]
@@ -475,6 +604,43 @@ mod tests {
             assert!(d.grants.iter().all(|g| g.slots == 321));
         }
         assert!(PipelinePlan::new(&s, false, "berry").is_err());
+    }
+    #[cfg(feature = "mosaic-spike")]
+    #[test]
+    fn ap13_strict_envelope_checks_selected_active_topology() {
+        for policy in ["unreserved", "reserved"] {
+            let mut s = settings(&[
+                ("backend", "mosaic"),
+                ("threads", "1"),
+                ("streams", "8"),
+                ("fanout", "8"),
+                ("queue", "64"),
+                ("write-batch", "8"),
+                ("queue-backend", "local"),
+                ("return", "local"),
+                ("overflow", "skip"),
+                ("capacity-policy", policy),
+                ("capacity-check", "require-envelope"),
+                ("class-slots", "4616,4616"),
+                ("domain-limit-bytes", "865500"),
+                ("memory-policy", "adaptive"),
+            ]);
+            // Original slots exactly cover 8 * (8 * 64 + 8 * 8 + 1).
+            assert!(PipelinePlan::new(&s, false, "mosaic").is_ok());
+            for elasticity in ["cold", "warm"] {
+                s.memory.as_mut().unwrap().elasticity = elasticity.into();
+                let error = PipelinePlan::new(&s, false, "mosaic").err().unwrap();
+                assert!(error.to_string().contains("selected memory topology"));
+            }
+            // Report mode exposes the deficit without promising coverage.
+            s.require_envelope = false;
+            let p = PipelinePlan::new(&s, false, "mosaic").unwrap();
+            let selected = p.memory.as_ref().unwrap();
+            assert!(selected.config.classes[0].slots * selected.initial < 4616);
+            s.require_envelope = true;
+            s.class_slots = vec![6000, 6000];
+            assert!(PipelinePlan::new(&s, false, "mosaic").is_ok());
+        }
     }
     #[test]
     fn si15_source_does_not_follow_class_rounding() {

@@ -30,6 +30,36 @@ def fixture():
 
 
 class PerformanceContracts(unittest.TestCase):
+    def test_writer_abort_schema_cannot_be_partially_missing(self):
+        server, client = fixture()
+        # A writer-only worker need not own a domain, but it must report the
+        # same loss schema. One missing report must not disable all accounting.
+        other = copy.deepcopy(server['workers'][0])
+        other.update(streams=[], drained=None, writer_completed=0, write_api_calls=0)
+        server['workers'].append(other)
+        self.assertFalse(v.validate_issuer_flow(server,client)['writer_abort_classification'])
+        reasons = dict.fromkeys(('deadline','policy','io','cancel','unwind'),0)
+        for first in [0, 1]:
+            server['workers'][first]['writer_aborted'] = reasons.copy()
+            with self.assertRaisesRegex(v.MeasurementError, 'mixed writer abort schemas'):
+                v.validate_issuer_flow(server,client)
+            del server['workers'][first]['writer_aborted']
+        for worker in server['workers']:
+            worker['writer_aborted'] = reasons.copy()
+        self.assertTrue(v.validate_issuer_flow(server,client)['writer_abort_classification'])
+
+    def test_writer_abort_counts_cannot_hide_or_duplicate_local_losses(self):
+        server, client = fixture()
+        worker = server['workers'][0]
+        worker['writer_aborted'] = dict.fromkeys(('deadline','policy','io','cancel','unwind'),0)
+        self.assertTrue(v.validate_issuer_flow(server,client)['writer_abort_classification'])
+        for reason in worker['writer_aborted']:
+            worker['writer_aborted'][reason] = 1
+            with self.assertRaises(v.MeasurementError): v.validate_issuer_flow(server,client)
+            worker['writer_aborted'][reason] = 0
+        del worker['writer_aborted']['cancel']
+        with self.assertRaises(v.MeasurementError): v.validate_issuer_flow(server,client)
+
     def test_fixed_arena_profiles_never_scale_payload_budget_with_queues(self):
         spec=importlib.util.spec_from_file_location('review',Path(__file__).with_name('performance-review.py'))
         m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
@@ -58,6 +88,24 @@ class PerformanceContracts(unittest.TestCase):
         self.assertEqual(result['delivery_fraction'],.5)
         self.assertEqual(result['uncompleted_enqueued'],1)
         self.assertEqual(result['unclassified_uncompleted_enqueued'],0)
+
+    def test_adaptive_report_rejects_invented_loss_phases(self):
+        server,client=fixture()
+        server['pipeline_plan']={'queue_backend':'local','freshness_priority':'adaptive'}
+        a=dict(window=2,pressure_q16=0,debt_ms=0,state='streaming',disconnect_reason=None,
+            age_evictions=0,window_evictions=0,dependency_evictions=0,dependency_skips=0,
+            policy_rejections=0,stale_commits=0,recovery_generation=0)
+        m=dict(capacity=2,prepared_capacity=2,storage_model_bytes=100,free=2,reserved=0,
+            queued=0,transferring=0,releasing=0,enqueued=1,transferred=1,evicted=0,
+            failed_replacements=0,cancelled=0,rejected_full=0,occupancy_high_water=1,
+            queue_age_samples=1,queue_age_max_ns=10,adaptive=a)
+        server['workers'][0]['local_queues']=[dict(stream=0,subscriber=0,metrics=m)]
+        self.assertEqual(v.validate_issuer_flow(server,client)['delivery_fraction'],1)
+        for key,value in [('window',3),('pressure_q16',65537),('age_evictions',1),
+            ('disconnect_reason','unknown'),('state','reclaimed')]:
+            old=a[key];a[key]=value
+            with self.assertRaises(v.MeasurementError):v.validate_issuer_flow(server,client)
+            a[key]=old
 
     def test_probe_requires_matching_arguments_and_nonempty_result(self):
         args={'iterations':10}

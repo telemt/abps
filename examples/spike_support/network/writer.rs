@@ -7,6 +7,54 @@ pub(super) struct WriterCounts {
     pub completed: AtomicU64,
     pub write_calls: AtomicU64,
     pub expired: AtomicU64,
+    pub aborted_deadline: AtomicU64,
+    pub aborted_policy: AtomicU64,
+    pub aborted_io: AtomicU64,
+    pub aborted_cancel: AtomicU64,
+    pub aborted_unwind: AtomicU64,
+}
+#[derive(Clone, Copy)]
+enum Abort {
+    Deadline,
+    Policy,
+    Io,
+    Cancel,
+}
+// AP-12: owns every installed writer frame across suspension and cancellation.
+// These counters describe transport outcomes, never queue or arena rights.
+struct Batch<'a, F> {
+    messages: [Option<Message<F>>; 8],
+    counts: &'a WriterCounts,
+    abort: Abort,
+}
+impl<'a, F> Batch<'a, F> {
+    fn new(counts: &'a WriterCounts) -> Self {
+        Self {
+            messages: std::array::from_fn(|_| None),
+            counts,
+            abort: Abort::Cancel,
+        }
+    }
+}
+impl<F> Drop for Batch<'_, F> {
+    fn drop(&mut self) {
+        let remaining = self.messages.iter().flatten().count() as u64;
+        if remaining == 0 {
+            return;
+        }
+        let counter = if std::thread::panicking() {
+            &self.counts.aborted_unwind
+        } else {
+            match self.abort {
+                Abort::Deadline => &self.counts.aborted_deadline,
+                Abort::Policy => &self.counts.aborted_policy,
+                Abort::Io => &self.counts.aborted_io,
+                Abort::Cancel => &self.counts.aborted_cancel,
+            }
+        };
+        counter.fetch_add(remaining, Ordering::Relaxed);
+        // Field destructors finish payload release before task completion/teardown.
+    }
 }
 async fn write_before_deadline<W: AsyncWrite + Unpin>(
     socket: &mut W,
@@ -33,16 +81,19 @@ async fn write_before_deadline<W: AsyncWrite + Unpin>(
     })
     .await
 }
-async fn batch<W: AsyncWrite + Unpin, F: AsRef<[u8]>>(
+async fn batch_with_queue<W: AsyncWrite + Unpin, F: AsRef<[u8]>, Q: Queue>(
     socket: &mut W,
     messages: &mut [Option<Message<F>>; 8],
     count: usize,
     counters: &WriterCounts,
+    queue: &mut Q,
+    timer: &mut Option<tokio::time::Interval>,
+    ready: &[Option<tokio::time::Instant>; 8],
 ) -> std::io::Result<()> {
-    let headers: [[u8; HEADER]; 8] = std::array::from_fn(|i| {
+    let headers: [[u8; HEADER_V2]; 8] = std::array::from_fn(|i| {
         messages[i]
             .as_ref()
-            .map_or([0; HEADER], |m| m.header.encode())
+            .map_or([0; HEADER_V2], |m| m.header.wire())
     });
     let mut current = 0;
     let mut offset = 0;
@@ -52,13 +103,14 @@ async fn batch<W: AsyncWrite + Unpin, F: AsRef<[u8]>>(
         let mut pending = 0;
         for i in current..count {
             let payload = messages[i].as_ref().unwrap().frame.as_ref();
+            let header_len = messages[i].as_ref().unwrap().header.wire_len();
             let offset = if i == current { offset } else { 0 };
-            if offset < HEADER {
-                slices[n] = IoSlice::new(&headers[i][offset..]);
+            if offset < header_len {
+                slices[n] = IoSlice::new(&headers[i][offset..header_len]);
                 n += 1;
-                pending += HEADER - offset;
+                pending += header_len - offset;
             }
-            let payload_offset = offset.saturating_sub(HEADER);
+            let payload_offset = offset.saturating_sub(header_len);
             if payload_offset < payload.len() {
                 slices[n] = IoSlice::new(&payload[payload_offset..]);
                 n += 1;
@@ -71,24 +123,40 @@ async fn batch<W: AsyncWrite + Unpin, F: AsRef<[u8]>>(
             .flatten()
             .filter_map(|m| m.deadline)
             .min();
-        let written = write_before_deadline(socket, &slices[..n], deadline).await?;
+        queue.batch_state(ready[current], deadline);
+        let written = if let Some(timer) = timer {
+            loop {
+                if queue.maintain().is_some() {
+                    return Err(std::io::ErrorKind::TimedOut.into());
+                }
+                tokio::select! {
+                    biased;
+                    _ = timer.tick() => { if queue.maintain().is_some() { return Err(std::io::ErrorKind::TimedOut.into()); } },
+                    result = write_before_deadline(socket, &slices[..n], deadline) => break result?,
+                }
+            }
+        } else {
+            write_before_deadline(socket, &slices[..n], deadline).await?
+        };
         if written == 0 {
             return Err(std::io::ErrorKind::WriteZero.into());
         }
         if written > pending {
             return Err(std::io::ErrorKind::InvalidData.into());
         }
+        queue.written(written);
         // End all borrowed descriptors before releasing any frame.
         let mut remaining = written;
         while current < count {
-            let size = HEADER + messages[current].as_ref().unwrap().frame.as_ref().len();
+            let size = messages[current].as_ref().unwrap().header.wire_len()
+                + messages[current].as_ref().unwrap().frame.as_ref().len();
             if remaining < size - offset {
                 offset += remaining;
                 break;
             }
             remaining -= size - offset;
-            messages[current].take(); // release now, even if a later write stalls
             counters.completed.fetch_add(1, Ordering::Relaxed);
+            messages[current].take(); // release now, even if a later write stalls
             current += 1;
             offset = 0;
         }
@@ -111,6 +179,9 @@ pub(super) async fn run(
 // bounded batch slot before releasing any queue credit.
 pub(super) trait Delivery {
     type Frame: AsRef<[u8]>;
+    fn ready(&self) -> Option<tokio::time::Instant> {
+        None
+    }
     fn into_batch(self, dst: &mut Option<Message<Self::Frame>>);
 }
 impl Delivery for Message {
@@ -121,6 +192,25 @@ impl Delivery for Message {
 }
 pub(super) trait Queue {
     type Item: Delivery;
+    fn close_reason(&self) -> Option<adaptive::CloseReason> {
+        None
+    }
+    fn adaptive(&self) -> bool {
+        false
+    }
+    fn maintain(&mut self) -> Option<adaptive::CloseReason> {
+        None
+    }
+    fn batch_limit(&self, configured: usize) -> usize {
+        configured
+    }
+    fn batch_state(
+        &mut self,
+        _ready: Option<tokio::time::Instant>,
+        _deadline: Option<tokio::time::Instant>,
+    ) {
+    }
+    fn written(&mut self, _bytes: usize) {}
     fn poll_recv(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>>;
     fn try_recv(&mut self) -> Option<Self::Item>;
 }
@@ -146,32 +236,116 @@ pub(super) async fn run_io<W: AsyncWrite + Unpin, Q: Queue>(
         }
     };
     tokio::pin!(cancellation);
-    tokio::select! {
+    let result = tokio::select! {
         _=&mut cancellation=>Ok(()),
         result=async {
-            while let Some(message)=std::future::poll_fn(|cx| queue.poll_recv(cx)).await {
-                let mut messages = std::array::from_fn(|_| None);
-                message.into_batch(&mut messages[0]);
+            let mut timer = queue.adaptive().then(|| {
+                let mut t = tokio::time::interval(adaptive::TICK);
+                t.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                t
+            });
+            loop {
+                queue.batch_state(None, None);
+                let message = if let Some(timer) = &mut timer {
+                    loop {
+                        if queue.maintain().is_some() { return Err(std::io::ErrorKind::TimedOut.into()); }
+                        tokio::select! {
+                            biased;
+                            _ = timer.tick() => { if queue.maintain().is_some() { return Err(std::io::ErrorKind::TimedOut.into()); } },
+                            m = std::future::poll_fn(|cx|queue.poll_recv(cx)) => break m,
+                        }
+                    }
+                } else { std::future::poll_fn(|cx| queue.poll_recv(cx)).await };
+                let Some(message) = message else { break; };
+                let mut ready = [None;8];
+                ready[0] = message.ready();
+                let limit = queue.batch_limit(max_batch);
+                let mut batch = Batch::new(&counters);
+                message.into_batch(&mut batch.messages[0]);
                 let mut count = 1;
-                while count < max_batch {
+                while count < limit {
                     match queue.try_recv() {
-                        Some(message) => { message.into_batch(&mut messages[count]); count += 1; }
+                        Some(message) => { ready[count] = message.ready(); message.into_batch(&mut batch.messages[count]); count += 1; }
                         None => break,
                     }
                 }
-                if let Err(error) = batch(&mut socket, &mut messages, count, &counters).await {
-                    if error.kind() == std::io::ErrorKind::TimedOut { counters.expired.fetch_add(1, Ordering::Relaxed); }
-                    return Err(error); // closes socket and drops batch + queued ownership
+                // Error closes the socket and drops batch + queued ownership.
+                let result = batch_with_queue(&mut socket, &mut batch.messages, count, &counters, &mut queue, &mut timer, &ready).await;
+                if let Err(error) = &result {
+                    batch.abort = if error.kind() == std::io::ErrorKind::TimedOut {
+                        match queue.close_reason() {
+                            None | Some(adaptive::CloseReason::FrameDeadline) => Abort::Deadline,
+                            _ => Abort::Policy,
+                        }
+                    } else { Abort::Io };
                 }
+                result?;
             }
             socket.shutdown().await
         }=>result,
+    };
+    if result
+        .as_ref()
+        .is_err_and(|e| e.kind() == std::io::ErrorKind::TimedOut)
+        && matches!(
+            queue.close_reason(),
+            None | Some(adaptive::CloseReason::FrameDeadline)
+        )
+    {
+        counters.expired.fetch_add(1, Ordering::Relaxed);
     }
+    result
+}
+
+// Layout only: no socket/channel/task is constructed by these type witnesses.
+pub(super) fn future_layout() -> Value {
+    fn size<A, F: Future>(_: impl FnOnce(A) -> F) -> usize {
+        std::mem::size_of::<F>()
+    }
+    type Common<Q> = (TcpStream, Q, oneshot::Receiver<()>, Arc<WriterCounts>);
+    let remote = size(|(s, q, c, n): Common<mpsc::Receiver<Message>>| run_io(s, q, c, n, 8));
+    let local = size(|(s, q, c, n): Common<local_queue::Receiver<Message>>| run_io(s, q, c, n, 8));
+    json!({"tokio_queue":remote,"local_queue":local,"scope":"compiler future layout; excludes allocation/task headers and referenced storage"})
+}
+
+#[cfg(test)]
+async fn batch<W: AsyncWrite + Unpin, F: AsRef<[u8]>>(
+    socket: &mut W,
+    messages: &mut [Option<Message<F>>; 8],
+    count: usize,
+    counters: &WriterCounts,
+) -> std::io::Result<()> {
+    let (_tx, mut queue) = mpsc::channel::<Message>(1);
+    batch_with_queue(
+        socket, messages, count, counters, &mut queue, &mut None, &[None; 8],
+    )
+    .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ap12_batch_outcomes_survive_unwind_without_double_classification() {
+        let counts = WriterCounts::default();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut batch = Batch::new(&counts);
+            for i in 0..3 {
+                batch.messages[i] = Some(Message {
+                    header: Header::default(),
+                    frame: Vec::<u8>::new(),
+                    deadline: None,
+                });
+            }
+            counts.completed.fetch_add(1, Ordering::Relaxed);
+            batch.messages[0].take();
+            panic!("injected writer unwind after completed prefix");
+        }));
+        assert!(result.is_err());
+        assert_eq!(counts.completed.load(Ordering::Relaxed), 1);
+        assert_eq!(counts.aborted_unwind.load(Ordering::Relaxed), 2);
+        assert_eq!(counts.aborted_cancel.load(Ordering::Relaxed), 0);
+    }
     #[tokio::test]
     async fn abps_scripted_writer_error_cleanup_preserves_exact_wire_prefix() {
         use super::super::scripted_io::{ScriptedIo, Step};
@@ -218,7 +392,12 @@ mod tests {
                             for id in 0..3 {
                                 let mut lease = origin.acquire(4).unwrap();
                                 lease.put(&[id as u8; 4]);
-                                let header = Header { id, len: 4, due: 0 };
+                                let header = Header {
+                                    id,
+                                    len: 4,
+                                    due: 0,
+                                    ..Header::default()
+                                };
                                 expected.extend_from_slice(&header.encode());
                                 expected.extend_from_slice(&[id as u8; 4]);
                                 let frame = {
@@ -273,6 +452,15 @@ mod tests {
                                 counts.completed.load(Ordering::Relaxed),
                                 (accepted / (HEADER + 4)) as u64
                             );
+                            assert_eq!(
+                                counts.aborted_io.load(Ordering::Relaxed),
+                                if accepted == batch_size * (HEADER + 4) {
+                                    (3 - batch_size).min(batch_size) as u64
+                                } else {
+                                    batch_size.min(3) as u64
+                                        - counts.completed.load(Ordering::Relaxed)
+                                }
+                            );
                             assert!(sender.is_closed());
                             assert_eq!(
                                 fixture.snapshot()["admitted"],
@@ -324,7 +512,12 @@ mod tests {
                 assert!(
                     sender
                         .try_send(Message {
-                            header: Header { id, len: 4, due: 0 },
+                            header: Header {
+                                id,
+                                len: 4,
+                                due: 0,
+                                ..Header::default()
+                            },
                             frame: ready[0].take().unwrap(),
                             deadline: Some(
                                 tokio::time::Instant::now() + Duration::from_millis(100)
@@ -470,7 +663,12 @@ mod tests {
             assert!(
                 sender
                     .try_send(Message {
-                        header: Header { len: 4, id, due: 0 },
+                        header: Header {
+                            len: 4,
+                            id,
+                            due: 0,
+                            ..Header::default()
+                        },
                         frame: b.freeze().into(),
                         deadline: Some(deadline)
                     })
@@ -499,6 +697,7 @@ mod tests {
         assert!(sender.is_closed());
         assert_eq!(counts.expired.load(Ordering::Relaxed), 1);
         assert_eq!(counts.completed.load(Ordering::Relaxed), 0);
+        assert_eq!(counts.aborted_deadline.load(Ordering::Relaxed), 2);
         assert_eq!(fixture.snapshot()["admitted"], 0);
         drop(origin);
         fixture.finish().unwrap();
@@ -525,7 +724,12 @@ mod tests {
             assert!(
                 sender
                     .try_send(Message {
-                        header: Header { len: 4, id, due: 0 },
+                        header: Header {
+                            len: 4,
+                            id,
+                            due: 0,
+                            ..Header::default()
+                        },
                         frame: b.freeze().into(),
                         deadline: None
                     })
@@ -537,7 +741,8 @@ mod tests {
             max: 2,
             stop: 3,
         };
-        let future = run_io(socket, receiver, stop, Arc::new(WriterCounts::default()), 1);
+        let counts = Arc::new(WriterCounts::default());
+        let future = run_io(socket, receiver, stop, counts.clone(), 1);
         tokio::pin!(future);
         assert!(
             std::future::poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
@@ -546,6 +751,7 @@ mod tests {
         );
         cancel.send(()).unwrap();
         future.await.unwrap();
+        assert_eq!(counts.aborted_cancel.load(Ordering::Relaxed), 1);
         assert!(sender.is_closed());
         assert_eq!(fixture.snapshot()["admitted"], 0);
         drop(origin);
@@ -573,6 +779,7 @@ mod tests {
                     len: 4,
                     id: i as u64,
                     due: 0,
+                    ..Header::default()
                 },
                 frame: b.freeze().into(),
                 deadline: None,
@@ -622,6 +829,7 @@ mod tests {
                 len: 4,
                 id: i as u64,
                 due: 0,
+                ..Header::default()
             };
             expected.extend_from_slice(&header.encode());
             expected.extend_from_slice(&[i as u8; 4]);
@@ -667,6 +875,7 @@ mod tests {
                 len: 4,
                 id: 1,
                 due: 0,
+                ..Header::default()
             },
             frame: b.freeze().into(),
             deadline: None,

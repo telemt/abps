@@ -48,6 +48,59 @@ by another subscriber, so eviction does not guarantee free arena capacity.
 No codec dependencies are interpreted; use this policy only where whole-frame loss
 is acceptable. In particular, a TCP write completion is not a playback guarantee.
 
+## Adaptive freshness
+
+`--freshness-priority=adaptive --queue-backend=local --return=local --overflow=skip`
+selects [AP-11](../CONTRIBUTING.md#ap-11-adaptive-freshness-and-dependency-recovery)
+for Mosaic scalar/batch fan-out. Physical capacity stays Q. A per-subscriber
+controller contracts its logical window and next writer batch under pressure,
+then slowly restores them after recovery. It uses a 100 ms fast average, 60%/20%
+hysteresis, and accumulated bad time that repays twice as fast during recovery.
+Each existing writer task samples at 10 ms with missed ticks skipped.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `freshness-target-ms` | 20 | Soft queued-frame age target |
+| `slow-grace-ms` | 2000 | Accumulated high-pressure time before close |
+| `write-stall-ms` | 500 | Active write without positive byte progress |
+| `frame-dependencies` | `independent` | Independent frames or `keyframe` recovery |
+| `keyframe-wait-ms` | 5000 | Recovery timeout, only with keyframe mode |
+
+Durations accept 1..3600000 ms. `freshness-min-age-ms` belongs to oldest, not
+adaptive. Existing `max-frame-age-ms` deadlines still close the connection and
+may expire before grace or stall timeouts. Idle input does not start a write-stall
+clock. A slowly progressing partial frame still contributes its age to pressure.
+
+Pruning removes at most eight whole queued frames per pass. Outstanding permits
+can temporarily keep occupancy above the new logical window; physical Q remains
+invariant. A partial write is completed or the connection closes. Queue pressure
+is an operational observation, not proof of a network/client fault. Socket write
+completion does not acknowledge delivery, and bytes already accepted by TCP may
+still reach a client after local disconnect.
+
+With `--frame-dependencies=keyframe`, the source supplies a monotonically increasing
+per-stream sequence and a recovery-point flag. Every gap invalidates dependent
+queued work for the affected recipient; resume only when a new keyframe commits.
+The source must ensure that marked frames need no missing predecessor. This does
+not parse codecs or support arbitrary dependency graphs/open GOP recovery.
+
+Keyframe mode explicitly selects wire v2: prefix `ABPS\x02\0\0\0` before the
+existing eight-byte connection handshake, then 32-byte frame headers. The first
+20 bytes retain v1 fields; bytes 20..28 hold the big-endian sequence, byte 28 is
+0/1 for delta/keyframe, and the last three bytes must be zero. All peers must use
+the same mode; version mismatch fails handshake. Independent mode retains v1.
+The benchmark marks every twentieth source frame as a recovery point by default;
+`keyframe-interval` changes that explicit generator cadence. `keyframe-burst`
+continues to describe payload sizes and does not supply recovery metadata.
+
+Queue reports distinguish window/age/dependency eviction, skipped dependencies,
+stale commits and terminal reasons (`sustained_pressure`, `write_stall`,
+`frame_deadline`, `keyframe_timeout`, `recovery_generation_exhausted`). A stale
+commit never changes a newer generation. Failed replacements count attempts that
+removed at least one old frame but failed to commit; they are not additional lost
+frames. `max_delivery_gap_ns` includes startup and the remainder of the measurement
+window after disconnect. Keep planned-delivery denominators for every subscriber.
+
 ## Measurements and reproduction
 
 Build before timing, with the same flags for every candidate:
@@ -79,3 +132,19 @@ experimental target is healthy-subscriber p99 <= 5 ms. A shared VM can identify
 candidates but cannot pass the dedicated-host performance gate. See the
 [harness guide](performance-harness.md) for evidence qualification and the
 [implementation report](reports/2026-10-18/fixed-arena-delivery.md) for current results.
+
+The adaptive campaign also exercises a 100 ms pause, sustained/ramping slow reads,
+and stop/resume, plus mixed frame sizes:
+
+```sh
+python3 scripts/performance-review.py --suite adaptive --repeats 7 --seconds 15 \
+  --output verification/artifacts/adaptive --build-record /path/to/build-record.json
+target/release/examples/spike_alloc --case=adaptive-queue --iterations=10000
+```
+
+The allocation probe covers prepared local controller/queue operations with a noop
+waker. It does not measure Tokio timers or prove that the complete TCP path avoids
+allocations. Adaptive policies are opt-in experimental behavior; the ordinary-path
+performance gate and dedicated-host requirement remain unchanged.
+The [adaptive implementation report](reports/2026-10-18/adaptive-freshness.md)
+records source-qualified checks, comparisons and remaining limits.

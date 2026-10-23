@@ -2299,6 +2299,119 @@
         "tsan"
       ],
       "critical": true
+    },
+    {
+      "id": "adaptive-freshness-conservation",
+      "selector": "ap11_",
+      "invariants": [
+        "AP-11",
+        "AP-10",
+        "SI-06",
+        "IO-02"
+      ],
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "hotpath-adapter-conservation",
+      "invariants": [
+        "AP-12",
+        "AP-10",
+        "SI-04",
+        "SI-06",
+        "IO-01",
+        "IO-02"
+      ],
+      "selector": "ap12_",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "adaptive-memory-conservation",
+      "invariants": [
+        "AP-13",
+        "MEM-01",
+        "MEM-02",
+        "MEM-03",
+        "LIFE-01"
+      ],
+      "selector": "ap13_",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "shared-memory-conservation",
+      "invariants": [
+        "AP-14",
+        "MEM-01",
+        "MEM-02",
+        "OWN-01",
+        "LIFE-01"
+      ],
+      "selector": "ap14_",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "serial-reuse",
+      "invariants": [
+        "AP-15",
+        "OWN-01",
+        "OWN-02",
+        "MEM-02",
+        "LIFE-02"
+      ],
+      "selector": "ap15_",
+      "features": "local-branches-spike,bytes-interop,serial-adapter",
+      "target": [
+        "--test",
+        "serial_adapter"
+      ],
+      "tools": [
+        "native",
+        "miri"
+      ],
+      "critical": true
     }
   ],
   "intentional_retention": [
@@ -2311,7 +2424,8 @@
     "mosaic::raw::branches::tests::br05_close_and_early_owner_drop_preserve_readers_and_neighbor_slot",
     "backends::reference::reservations::forgotten_buffer_pins_grant_and_abandonment_remains_safe",
     "backends::berry::reservations::forgotten_buffer_pins_grant_and_abandonment_remains_safe",
-    "backends::mosaic::reservations::forgotten_buffer_pins_grant_and_abandonment_remains_safe"
+    "backends::mosaic::reservations::forgotten_buffer_pins_grant_and_abandonment_remains_safe",
+    "spike_support::network::memory::bank::tests::ap13_abandoned_root_retains_reservation_after_late_return"
   ],
   "allocation_probes": [
     {
@@ -2382,6 +2496,133 @@
       "invariants": [
         "AP-10",
         "AP-07"
+      ]
+    },
+    {
+      "id": "adaptive-queue",
+      "example": "spike_alloc",
+      "arguments": [
+        "--case=adaptive-queue",
+        "--iterations=10000"
+      ],
+      "invariants": [
+        "AP-11",
+        "AP-10",
+        "MEM-01"
+      ]
+    },
+    {
+      "id": "staged-ingress",
+      "example": "spike_alloc",
+      "arguments": [
+        "--case=staged-ingress",
+        "--iterations=10000"
+      ],
+      "invariants": [
+        "AP-12",
+        "IO-01",
+        "MEM-01"
+      ]
+    },
+    {
+      "id": "adaptive-memory-prepared",
+      "example": "spike_alloc",
+      "arguments": [
+        "--case=memory-policy",
+        "--backend=mosaic",
+        "--threads=1",
+        "--streams=8",
+        "--fanout=8",
+        "--queue=64",
+        "--queue-backend=local",
+        "--return=local",
+        "--overflow=skip",
+        "--memory-policy=adaptive",
+        "--class-slots=128,128",
+        "--iterations=10000"
+      ],
+      "invariants": [
+        "AP-13",
+        "MEM-01",
+        "MEM-02"
+      ]
+    },
+    {
+      "id": "shared-memory-full",
+      "example": "spike_alloc",
+      "arguments": [
+        "--case=memory-policy",
+        "--backend=mosaic",
+        "--threads=1",
+        "--streams=8",
+        "--fanout=8",
+        "--queue=64",
+        "--queue-backend=local",
+        "--return=local",
+        "--overflow=skip",
+        "--memory-policy=adaptive-shared",
+        "--class-slots=128,128",
+        "--iterations=10000",
+        "--memory-accounting=full"
+      ],
+      "invariants": [
+        "AP-14",
+        "MEM-01",
+        "MEM-02"
+      ]
+    },
+    {
+      "id": "shared-memory-cached",
+      "example": "spike_alloc",
+      "arguments": [
+        "--case=memory-policy",
+        "--backend=mosaic",
+        "--threads=1",
+        "--streams=8",
+        "--fanout=8",
+        "--queue=64",
+        "--queue-backend=local",
+        "--return=local",
+        "--overflow=skip",
+        "--memory-policy=adaptive-shared",
+        "--class-slots=128,128",
+        "--iterations=10000",
+        "--memory-accounting=cached"
+      ],
+      "invariants": [
+        "AP-14",
+        "MEM-01",
+        "MEM-02"
+      ]
+    },
+    {
+      "id": "serial-copy",
+      "example": "serial_alloc",
+      "arguments": [
+        "--mode=serial-copy",
+        "--size=1500",
+        "--working-set=64",
+        "--iterations=100000"
+      ],
+      "invariants": [
+        "AP-15",
+        "MEM-02",
+        "PROG-04"
+      ]
+    },
+    {
+      "id": "serial-init",
+      "example": "serial_alloc",
+      "arguments": [
+        "--mode=serial-init",
+        "--size=1500",
+        "--working-set=64",
+        "--iterations=100000"
+      ],
+      "invariants": [
+        "AP-15",
+        "MEM-02",
+        "PROG-04"
       ]
     }
   ],
@@ -2748,6 +2989,20 @@
       "kind": "mutation",
       "checks": [
         "open-error-order"
+      ]
+    },
+    {
+      "id": "shared-soft-total-bypass",
+      "kind": "mutation",
+      "checks": [
+        "shared-memory-conservation"
+      ]
+    },
+    {
+      "id": "shared-cache-undercharge",
+      "kind": "mutation",
+      "checks": [
+        "shared-memory-conservation"
       ]
     }
   ],
@@ -3594,6 +3849,174 @@
         "configuration"
       ],
       "reason": "source feature gate requires an issuer backend"
+    },
+    {
+      "features": "",
+      "target": [
+        "--test",
+        "serial_adapter"
+      ],
+      "reason": "serial-adapter feature required"
+    },
+    {
+      "features": "berry-spike",
+      "target": [
+        "--test",
+        "serial_adapter"
+      ],
+      "reason": "serial-adapter feature required"
+    },
+    {
+      "features": "bytes-interop",
+      "target": [
+        "--test",
+        "serial_adapter"
+      ],
+      "reason": "serial-adapter feature required"
+    },
+    {
+      "features": "mosaic-spike",
+      "target": [
+        "--test",
+        "serial_adapter"
+      ],
+      "reason": "serial-adapter feature required"
+    },
+    {
+      "features": "mosaic-spike,bytes-interop",
+      "target": [
+        "--test",
+        "serial_adapter"
+      ],
+      "reason": "serial-adapter feature required"
+    },
+    {
+      "features": "local-branches-spike",
+      "target": [
+        "--test",
+        "serial_adapter"
+      ],
+      "reason": "serial-adapter feature required"
+    },
+    {
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--test",
+        "serial_adapter"
+      ],
+      "reason": "serial-adapter feature required"
+    },
+    {
+      "features": "serial-adapter",
+      "target": [
+        "--test",
+        "local_branches"
+      ],
+      "reason": "local-branches-spike required"
+    },
+    {
+      "features": "serial-adapter",
+      "target": [
+        "--example",
+        "tcp_fanout"
+      ],
+      "reason": "runnable integration example; tests live in the tcp integration target"
+    },
+    {
+      "features": "serial-adapter",
+      "target": [
+        "--example",
+        "serial_probe"
+      ],
+      "reason": "runnable serial example; lifecycle tests in serial_adapter"
+    },
+    {
+      "features": "serial-adapter",
+      "target": [
+        "--example",
+        "serial_alloc"
+      ],
+      "reason": "runnable serial example; lifecycle tests in serial_adapter"
+    },
+    {
+      "features": "serial-adapter",
+      "target": [
+        "--example",
+        "serial_pipeline"
+      ],
+      "reason": "runnable serial example; lifecycle tests in serial_adapter"
+    },
+    {
+      "features": "serial-adapter,bytes-interop",
+      "target": [
+        "--test",
+        "local_branches"
+      ],
+      "reason": "local-branches-spike required"
+    },
+    {
+      "features": "serial-adapter,bytes-interop",
+      "target": [
+        "--example",
+        "tcp_fanout"
+      ],
+      "reason": "runnable integration example; tests live in the tcp integration target"
+    },
+    {
+      "features": "serial-adapter,bytes-interop",
+      "target": [
+        "--example",
+        "serial_probe"
+      ],
+      "reason": "runnable serial example; lifecycle tests in serial_adapter"
+    },
+    {
+      "features": "serial-adapter,bytes-interop",
+      "target": [
+        "--example",
+        "serial_alloc"
+      ],
+      "reason": "runnable serial example; lifecycle tests in serial_adapter"
+    },
+    {
+      "features": "serial-adapter,bytes-interop",
+      "target": [
+        "--example",
+        "serial_pipeline"
+      ],
+      "reason": "runnable serial example; lifecycle tests in serial_adapter"
+    },
+    {
+      "features": "local-branches-spike,bytes-interop,serial-adapter",
+      "target": [
+        "--example",
+        "tcp_fanout"
+      ],
+      "reason": "runnable integration example; tests live in the tcp integration target"
+    },
+    {
+      "features": "local-branches-spike,bytes-interop,serial-adapter",
+      "target": [
+        "--example",
+        "serial_probe"
+      ],
+      "reason": "runnable serial example; lifecycle tests in serial_adapter"
+    },
+    {
+      "features": "local-branches-spike,bytes-interop,serial-adapter",
+      "target": [
+        "--example",
+        "serial_alloc"
+      ],
+      "reason": "runnable serial example; lifecycle tests in serial_adapter"
+    },
+    {
+      "features": "local-branches-spike,bytes-interop,serial-adapter",
+      "target": [
+        "--example",
+        "serial_pipeline"
+      ],
+      "reason": "runnable serial example; lifecycle tests in serial_adapter"
     }
   ],
   "verification_directions": [

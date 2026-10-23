@@ -19,6 +19,7 @@ impl Decisions {
 fn preflight(
     subscribers: &mut [Subscriber],
     skip: bool,
+    keyframe: bool,
 ) -> ([Option<local_queue::IngressPermit<'_>>; 20], Decisions) {
     let mut permits = std::array::from_fn(|_| None);
     let mut decisions = Decisions::default();
@@ -27,9 +28,11 @@ fn preflight(
             decisions.absent += 1;
             continue;
         }
-        match subscriber.queue.try_reserve() {
+        match subscriber.queue.reserve_frame(keyframe) {
             Ok(permit) => *slot = Some(permit),
-            Err(local_queue::Rejected::Full) if skip => decisions.skipped += 1,
+            Err(local_queue::Rejected::Full | local_queue::Rejected::Policy) if skip => {
+                decisions.skipped += 1
+            }
             Err(_) => {
                 decisions.rejected += 1;
                 decisions.disconnected += 1;
@@ -139,7 +142,7 @@ pub(super) async fn run(session: Session, settings: Settings) -> Result<IngressS
     if let Some(group) = worker_fanout {
         return super::worker_fanout::ingress(
             into_async(socket)?,
-            origin,
+            origin.ordinary()?,
             group,
             scratch,
             settings,
@@ -159,19 +162,22 @@ pub(super) async fn run(session: Session, settings: Settings) -> Result<IngressS
 }
 pub(super) async fn run_io<S: AsyncRead + tokio::io::AsyncWrite + Unpin>(
     mut socket: S,
-    origin: Origin,
+    origin: impl Into<memory::StreamOrigin>,
     mut subscribers: Vec<Subscriber>,
-    mut scratch: Box<[u8]>,
+    scratch: Box<[u8]>,
     settings: Settings,
     stream: usize,
 ) -> Result<IngressStats> {
+    let origin = origin.into();
     let mut stats = IngressStats {
         stream,
         ..IngressStats::default()
     };
     socket.write_all(&[1]).await?;
+    let mut input = input::Input::new(socket, scratch, settings.staged_copy);
+    let mut previous_sequence: Option<u64> = None;
     loop {
-        let header = match Header::read(&mut socket).await {
+        let header = match Header::read_mode(&mut input, settings.keyed()).await {
             Ok(header) => header,
             Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(error) => {
@@ -183,11 +189,24 @@ pub(super) async fn run_io<S: AsyncRead + tokio::io::AsyncWrite + Unpin>(
             stats.stop = Some("invalid_length".into());
             break;
         }
-        let (mut permits, decisions) = preflight(&mut subscribers, settings.skip);
+        if let Some(seq) = header.sequence {
+            if previous_sequence.is_some_and(|old| seq <= old) {
+                stats.stop = Some("invalid_sequence".into());
+                break;
+            }
+            if previous_sequence.and_then(|old| old.checked_add(1)) != Some(seq) {
+                for subscriber in &subscribers {
+                    subscriber.queue.gap();
+                }
+            }
+            previous_sequence = Some(seq);
+        }
+        origin.offer(header.len);
+        let (mut permits, decisions) = preflight(&mut subscribers, settings.skip, header.keyframe);
         stats.disconnected += decisions.disconnected;
         let recipients = permits.iter().flatten().count() as u64;
         if recipients == 0 {
-            if let Err(error) = discard(&mut socket, header.len, &mut scratch).await {
+            if let Err(error) = input.discard(header.len).await {
                 stats.stop = Some(format!("discard_payload:{error}"));
                 break;
             }
@@ -197,10 +216,25 @@ pub(super) async fn run_io<S: AsyncRead + tokio::io::AsyncWrite + Unpin>(
             decisions.commit(&mut stats);
             continue;
         }
-        let mut lease = match acquire(&origin, header.len, &mut stats.admission_contended).await {
+        let mut lease = match origin
+            .acquire(header.len, &mut stats.admission_contended)
+            .await
+        {
             Ok(lease) => lease,
-            Err(error) if settings.skip && overload(error) => {
-                if let Err(error) = discard(&mut socket, header.len, &mut scratch).await {
+            Err(memory::Failure::Policy(_reason)) => {
+                if let Err(error) = input.discard(header.len).await {
+                    stats.stop = Some(format!("discard_payload:{error}"));
+                    break;
+                }
+                stats.received += 1;
+                stats.discarded += 1;
+                stats.ingress_rejected += recipients;
+                stats.memory_policy_discards += 1;
+                decisions.commit(&mut stats);
+                continue;
+            }
+            Err(memory::Failure::Core(error)) if settings.skip && overload(error) => {
+                if let Err(error) = input.discard(header.len).await {
                     stats.stop = Some(format!("discard_payload:{error}"));
                     break;
                 }
@@ -209,12 +243,12 @@ pub(super) async fn run_io<S: AsyncRead + tokio::io::AsyncWrite + Unpin>(
                 decisions.commit(&mut stats);
                 continue;
             }
-            Err(error) => {
+            Err(memory::Failure::Core(error)) => {
                 stats.stop = Some(format!("acquire:{error}"));
                 break;
             }
         };
-        if let Err(error) = fill(&mut socket, &mut lease, header.len, settings.read_buf).await {
+        if let Err(error) = input.fill(&mut lease, header.len, settings.read_buf).await {
             stats.stop = Some(format!("read_payload:{error}"));
             break;
         }
@@ -274,16 +308,18 @@ pub(super) async fn run_io<S: AsyncRead + tokio::io::AsyncWrite + Unpin>(
             break;
         }
         stats.accepted += 1;
-        let deadline = settings
-            .max_frame_age
-            .map(|age| tokio::time::Instant::now() + age);
+        let ready = tokio::time::Instant::now();
+        let deadline = settings.max_frame_age.map(|age| ready + age);
         for (permit, frame) in permits.iter_mut().zip(&mut views) {
             if let Some(permit) = permit.take() {
-                permit.send(Message {
-                    header,
-                    frame: frame.take().unwrap(),
-                    deadline,
-                });
+                permit.send_ready(
+                    Message {
+                        header,
+                        frame: frame.take().unwrap(),
+                        deadline,
+                    },
+                    ready,
+                );
                 stats.enqueued += 1;
             }
         }
@@ -453,6 +489,13 @@ mod tests {
     }
     #[tokio::test]
     async fn skip_exhausted_frame_and_resume_at_next_header() {
+        skip_and_resume(false).await;
+    }
+    #[tokio::test]
+    async fn ap12_staged_skip_exhausted_frame_and_resume_at_next_header() {
+        skip_and_resume(true).await;
+    }
+    async fn skip_and_resume(staged: bool) {
         for budget in [512, 1024] {
             let fixture = Fixture::new(
                 "berry",
@@ -468,12 +511,14 @@ mod tests {
             let held = origin.acquire(1).unwrap();
             let (sub, mut receiver) = subscriber(2);
             let (socket, mut source) = tokio::io::duplex(8);
+            let mut settings = config(true);
+            settings.staged_copy = staged;
             let ingress = run_io(
                 socket,
                 origin,
                 vec![sub],
                 vec![0; 17].into_boxed_slice(),
-                config(true),
+                settings,
                 0,
             );
             let drive = async {
@@ -482,6 +527,7 @@ mod tests {
                     len: 32,
                     id: 1,
                     due: 0,
+                    ..Header::default()
                 };
                 source.write_all(&first.encode()).await.unwrap();
                 source.write_all(&[7; 32]).await.unwrap();
@@ -492,6 +538,7 @@ mod tests {
                     len: 32,
                     id: 2,
                     due: 0,
+                    ..Header::default()
                 };
                 source.write_all(&second.encode()).await.unwrap();
                 source.write_all(&[9; 32]).await.unwrap();
@@ -555,6 +602,7 @@ mod regression {
                         len: 0,
                         id: 0,
                         due: 0,
+                        ..Header::default()
                     },
                     frame: origin.acquire(1).unwrap().freeze().into(),
                     deadline: None,
@@ -575,6 +623,7 @@ mod regression {
                             len: 32,
                             id: 1,
                             due: 0,
+                            ..Header::default()
                         }
                         .encode(),
                     )
@@ -635,6 +684,7 @@ mod regression {
                         len: 32,
                         id: 1,
                         due: 0,
+                        ..Header::default()
                     }
                     .encode(),
                 )
@@ -781,6 +831,7 @@ mod regression {
                         len: 4,
                         id: 1,
                         due: 0,
+                        ..Header::default()
                     }
                     .encode(),
                 )
@@ -853,6 +904,7 @@ mod regression {
                         len: 4,
                         id: 123,
                         due: 0,
+                        ..Header::default()
                     }
                     .encode(),
                 )
@@ -924,6 +976,7 @@ mod regression {
                     len: 4,
                     id: 123,
                     due: 0,
+                    ..Header::default()
                 }
                 .encode(),
             )

@@ -181,7 +181,12 @@ async fn ap10_real_payload_partial_write_and_eviction_preserve_wire_and_budget()
         let mut lease = origin.acquire(4).unwrap();
         lease.put(&[id as u8; 4]);
         Message {
-            header: Header { id, len: 4, due: 0 },
+            header: Header {
+                id,
+                len: 4,
+                due: 0,
+                ..Header::default()
+            },
             frame: lease.freeze().into(),
             deadline: None,
         }
@@ -221,6 +226,7 @@ async fn ap10_real_payload_partial_write_and_eviction_preserve_wire_and_budget()
         id: 3,
         len: 4,
         due: 0,
+        ..Header::default()
     }
     .encode()
     .to_vec();
@@ -290,7 +296,12 @@ async fn ap10_writer_error_expiry_and_cancel_release_batch_and_queue() {
             let mut lease = origin.acquire(4).unwrap();
             lease.put(&[id as u8; 4]);
             tx.try_reserve().unwrap().send(Message {
-                header: Header { id, len: 4, due: 0 },
+                header: Header {
+                    id,
+                    len: 4,
+                    due: 0,
+                    ..Header::default()
+                },
                 frame: lease.freeze().into(),
                 deadline: (failure == "expiry").then(|| Instant::now() + Duration::from_millis(1)),
             });
@@ -365,6 +376,7 @@ async fn ap10_ingress_replacement_failure_and_cancellation_are_observable() {
                 id: 0,
                 len: 0,
                 due: 0,
+                ..Header::default()
             },
             frame: old.into(),
             deadline: None,
@@ -378,6 +390,7 @@ async fn ap10_ingress_replacement_failure_and_cancellation_are_observable() {
             id: 1,
             len: 4,
             due: 0,
+            ..Header::default()
         }
         .encode()
         .to_vec();

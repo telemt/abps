@@ -500,3 +500,14 @@ The completed evidence includes 335 native core/snapshot/retention trials,
 five CPU profiles and syscall/counter probes. Library sources and existing tests
 remained byte-identical by SHA-256. Remote CI, production Loom/Miri, sanitizers,
 long soak and cross-target performance are not claimed.
+
+## Later adapter experiments
+
+The [AP-12 report](reports/2026-10-19/hot-path-experiments.md) examines the current
+Mosaic TCP adapter at fixed arena size. It does not update this page's historical
+reference-backend measurements. The [harness guide](performance-harness.md#adapter-hot-path-experiments-ap-12)
+describes opt-in staging, external storage ceilings and writer loss accounting.
+
+The opt-in [adaptive memory experiment](adaptive-memory.md) compares fixed and
+adaptive soft admission with explicitly charged small-root topology. Retention
+replay, trace and TCP timing are separate evidence; defaults remain unchanged.

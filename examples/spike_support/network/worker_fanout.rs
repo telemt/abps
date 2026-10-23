@@ -149,7 +149,7 @@ pub(super) async fn ingress<S: AsyncRead + tokio::io::AsyncWrite + Unpin>(
     mut socket: S,
     origin: Origin,
     mut group: Ingress,
-    mut scratch: Box<[u8]>,
+    scratch: Box<[u8]>,
     settings: Settings,
     stream: usize,
 ) -> Result<IngressStats> {
@@ -159,8 +159,9 @@ pub(super) async fn ingress<S: AsyncRead + tokio::io::AsyncWrite + Unpin>(
         ..Default::default()
     };
     socket.write_all(&[1]).await?;
+    let mut input = input::Input::new(socket, scratch, settings.staged_copy);
     loop {
-        let header = match Header::read(&mut socket).await {
+        let header = match Header::read(&mut input).await {
             Ok(h) => h,
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(e) => {
@@ -176,7 +177,7 @@ pub(super) async fn ingress<S: AsyncRead + tokio::io::AsyncWrite + Unpin>(
         let (credits, skipped, rejected, absent) = preflight(&mut group, settings.skip, &mut stats);
         let recipients = credits.iter().flatten().count() as u64;
         if recipients == 0 {
-            if let Err(e) = super::ingress::discard(&mut socket, header.len, &mut scratch).await {
+            if let Err(e) = input.discard(header.len).await {
                 stats.stop = Some(format!("discard_payload:{e}"));
                 break;
             }
@@ -191,8 +192,7 @@ pub(super) async fn ingress<S: AsyncRead + tokio::io::AsyncWrite + Unpin>(
         let mut lease = match acquire(&origin, header.len, &mut stats.admission_contended).await {
             Ok(b) => b,
             Err(e) if settings.skip && super::ingress::overload(e) => {
-                if let Err(e) = super::ingress::discard(&mut socket, header.len, &mut scratch).await
-                {
+                if let Err(e) = input.discard(header.len).await {
                     stats.stop = Some(format!("discard_payload:{e}"));
                     break;
                 }
@@ -208,9 +208,7 @@ pub(super) async fn ingress<S: AsyncRead + tokio::io::AsyncWrite + Unpin>(
                 break;
             }
         };
-        if let Err(e) =
-            super::ingress::fill(&mut socket, &mut lease, header.len, settings.read_buf).await
-        {
+        if let Err(e) = input.fill(&mut lease, header.len, settings.read_buf).await {
             stats.stop = Some(format!("read_payload:{e}"));
             break;
         }
@@ -417,7 +415,12 @@ mod tests {
         Bundle {
             frame: out[0].take(),
             credits,
-            header: Header { len: 4, id, due: 0 },
+            header: Header {
+                len: 4,
+                id,
+                due: 0,
+                ..Header::default()
+            },
             deadline: None,
             generation: group.generation,
             flow: group.flow.clone(),
@@ -777,6 +780,7 @@ mod tests {
                         len: 4,
                         id: 0,
                         due: 0,
+                        ..Header::default()
                     }
                     .encode(),
                 )
@@ -884,6 +888,7 @@ pub(super) fn allocation_probe(
                     id: 0,
                     len: 4,
                     due: 0,
+                    ..Header::default()
                 },
                 deadline: None,
                 generation: group.generation,

@@ -12,6 +12,7 @@ default = []
 berry-spike = []
 mosaic-spike = []
 local-branches-spike = ["mosaic-spike"]
+serial-adapter = ["mosaic-spike"]
 bytes-interop = ["berry-spike", "dep:bytes"]
 # Instruments the protocol in library unit tests only; normal builds still use std.
 loom-model = ["berry-spike"]
@@ -37,6 +38,24 @@ incremental = false
 [profile.test]
 debug = 0
 incremental = false
+
+# Explicit final-executable experiment; never changes the ordinary release profile.
+[profile.perf-lto]
+inherits = "release"
+lto = "thin"
+codegen-units = 1
+
+[[example]]
+name = "serial_probe"
+required-features = ["serial-adapter"]
+
+[[example]]
+name = "serial_alloc"
+required-features = ["serial-adapter"]
+
+[[example]]
+name = "serial_pipeline"
+required-features = ["serial-adapter"]
 
 [[example]]
 name = "spike_probe"

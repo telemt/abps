@@ -120,6 +120,58 @@ Report irreversible evictions, failed replacements and queue metadata separately
 Keep defaults unchanged; the profile's 5 ms healthy-subscriber p99 target does not
 weaken AP-09 or establish a production latency guarantee.
 
+AP-11 adds opt-in adaptive local freshness. Preserve physical Q while changing only
+logical admission window W; old permits are not revoked by contraction. Prune at
+most eight queued frames per pass and never evict writer ownership. Policy timers
+belong to existing writer tasks. Distinguish queue pressure, source/admission loss,
+dependency recovery and hard frame expiry. Keyframe recovery uses explicit v2
+metadata and nonwrapping generations; stale permits must not invalidate a new
+committed keyframe. Keep v1 wire bytes and ordinary defaults unchanged. Include
+all losses and delivery gaps in results; zero-allocation claims cover the measured
+prepared queue/controller operations, not runtime timer/socket implementation.
+
+AP-12 permits explicit staged-copy ingress and measured adapter experiments. Keep
+prefetched wire bytes in bounded, separately charged scratch; permits precede arena
+admission and Skip preserves the next frame. Retain fresh checks before every socket
+poll when reusing timers or sharing time observations. Classify cancelled writer
+batch ownership; local statistics must survive unwind. Compare identical resources
+with at most 5% modeled external growth. Unsafe ring work stays in disposable trees;
+do not weaken the safe reference or adapter's unsafe prohibition.
+
+AP-13 isolates adaptive memory in an opt-in issuer-local adapter. Check logical
+hard admission across every root generation without await; soft contraction
+retains debt. Charge complete layouts before prepare, preserve old origins through
+frame completion, and refund only confirmed teardown. Bound roots/attempts at
+32/64 and enforce 125% arena / 105% external ceilings before resources. Keep policy
+rejections distinct from core errors. Demand includes rejected headers and a full
+requested-slot quantum; correlation, retention replay and TCP are different evidence.
+No new atomics, bookkeeping or allocation belong in core Drop.
+
+AP-14 adds opt-in adaptive-shared opportunity in one Unreserved Mosaic root.
+Check the full charge against hard and shared-total limits; loans do not raise
+targets or revoke retained rights. Pressure permits a whole-slot crossing only
+when both stream and group start below target. Keep offered and eligible demand
+separate. Cached admitted must remain an upper bound: guard attempted increases,
+lower only from actual ledgers, refresh once before a count-based refusal.
+Keep full-reading and unrestricted-loan comparisons, charge all prepared metadata,
+and leave ordinary Drop and defaults unchanged.
+
+AP-15 permits the explicit `serial-adapter` wrapper over one retained Mosaic
+BufMut. Begin and guard destruction clear filled length, never charge or capacity;
+initialized bytes remain lease-scoped. Frame borrows exclude the next writer.
+Keep the wrapper safe and runtime-independent, without mutable lease escape,
+cloning, thaw, per-frame admission or new Drop bookkeeping. Test cancellation,
+forgotten guards, lifetime boundaries and idle retention. Do not apply serial
+reuse to independent TCP fan-out or change ordinary defaults from microbenchmarks.
+
+AP-16 isolates admission pacing in research adapters. One pending header per
+stream owns neither payload nor queue permits. Credits authorize attempts only;
+full class charge commits once on successful acquisition and is not refunded by
+later I/O failure. Keep one synchronous core attempt, a nonextending header-based
+deadline, FIFO cancellation generations, and prepared bounded scheduling. Distinguish
+continuous bucket and fixed-window tick bounds. Keep ordinary defaults and core
+Drop unchanged; qualify replay, instrumented returns and TCP separately.
+
 1. **No hidden allocation in steady-state hot paths.** Include metadata,
    collections, per-view objects, system frees, mapping changes, helping, errors,
    and first return from a previously uninvolved thread.

@@ -46,6 +46,51 @@ pub(super) fn sequence_before(id: u64, stream: usize, streams: usize, skew: bool
         }
 }
 
+/// Four-frame bursts, identical per-stream counts and payload sequences. IDs are
+/// monotone on each stream in every pattern. Due times are monotone globally.
+pub(super) fn scheduled(
+    id: u64,
+    streams: usize,
+    skew: bool,
+    pattern: &str,
+    rate: u64,
+) -> (usize, u64, Duration, Duration) {
+    if pattern == "steady" {
+        let stream = route(id, streams, skew);
+        return (
+            stream,
+            sequence_before(id, stream, streams, skew),
+            Duration::from_secs_f64(id as f64 / rate as f64),
+            Duration::from_secs_f64(1.0 / rate as f64),
+        );
+    }
+    let block = streams as u64 * 4;
+    let cycle = id / block;
+    let offset = id % block;
+    let shifted = pattern == "shifted" || (pattern == "phase-change" && (cycle / 32) % 2 == 1);
+    let (stream, seq, slot, width) = if shifted {
+        (
+            (offset / 4) as usize,
+            cycle * 4 + offset % 4,
+            cycle * block + offset / 4 * 4,
+            4,
+        )
+    } else {
+        (
+            (offset % streams as u64) as usize,
+            cycle * 4 + offset / streams as u64,
+            cycle * block,
+            block,
+        )
+    };
+    (
+        stream,
+        seq,
+        Duration::from_secs_f64(slot as f64 / rate as f64),
+        Duration::from_secs_f64(width as f64 / rate as f64),
+    )
+}
+
 fn pace(
     args: Args,
     settings: Settings,
@@ -68,7 +113,9 @@ fn pace(
     };
     let mut sequence = vec![0u64; settings.streams];
     for id in 0..planned {
-        let stream = route(id, settings.streams, skew);
+        let (stream, expected_sequence, due, window) =
+            scheduled(id, settings.streams, skew, &settings.arrival_pattern, rate);
+        debug_assert_eq!(sequence[stream], expected_sequence);
         let len = settings.payload_size(stream, sequence[stream]);
         sequence[stream] += 1;
         let class = settings.capacities().partition_point(|&n| n < len);
@@ -82,7 +129,6 @@ fn pace(
         for value in [stream as u64, sequence[stream] - 1, len as u64] {
             stats.sequence_hash = (stats.sequence_hash ^ value).wrapping_mul(0x100000001b3);
         }
-        let due = Duration::from_secs_f64(id as f64 / rate as f64);
         let at = start + due;
         if let Some(wait) = at.checked_duration_since(Instant::now())
             && wait > Duration::from_millis(1)
@@ -92,17 +138,15 @@ fn pace(
         while Instant::now() < at {
             std::hint::spin_loop();
         }
-        if Instant::now()
-            .saturating_duration_since(start)
-            .as_secs_f64()
-            * rate as f64
-            >= (id + 1) as f64
-        {
+        if Instant::now() >= at + window {
             stats.missed += 1;
             continue;
         }
         stats.attempted += 1;
         match queues[stream].try_send(Header {
+            sequence: settings.keyed().then_some(sequence[stream] - 1),
+            keyframe: settings.keyed()
+                && (sequence[stream] - 1).is_multiple_of(settings.keyframe_interval),
             len,
             id,
             due: due.as_nanos() as u64,
@@ -190,10 +234,10 @@ pub(super) fn run(args: &Args) -> Result<Value> {
         let mut sockets = Vec::new();
         let mut sources = Vec::new();
         for stream in 0..settings.streams {
-            sources.push(connect(ports[stream % settings.workers], stream, settings.fanout).await?);
+            sources.push(connect_mode(ports[stream % settings.workers], stream, settings.fanout, settings.keyed()).await?);
             for subscriber in 0..settings.fanout {
                 sockets.push((
-                    connect(ports[stream % settings.workers], stream, subscriber).await?,
+                    connect_mode(ports[stream % settings.workers], stream, subscriber, settings.keyed()).await?,
                     stream,
                     subscriber,
                 ));
@@ -297,7 +341,7 @@ pub(super) fn run(args: &Args) -> Result<Value> {
             "queue_full":schedule.full,"queue_closed":schedule.closed,
             "planned_classes_by_stream":schedule.classes,"sequence_hash":format!("{:016x}",schedule.sequence_hash),
             "planned_requested_bytes":schedule.requested_bytes,"planned_rounded_bytes":schedule.rounded_bytes,"unserviceable_frames":schedule.unserviceable,"queue_capacity":queue_capacity,
-            "seed":settings.seed,"keyframe_burst":settings.keyframe_burst},
+            "arrival_pattern":settings.arrival_pattern,"seed":settings.seed,"keyframe_burst":settings.keyframe_burst},
             "consumers":results,"total":{"invalid":invalid,"delivered":delivered,"bytes":bytes,"overdue":overdue,
             "timely_delivered":delivered-overdue,"expired_delivered":overdue,"timely_bytes":timely_bytes,
             "max_frame_age_ms":settings.max_frame_age.map(|a|a.as_millis()),
@@ -343,6 +387,7 @@ mod tests {
             len: 1,
             id: 0,
             due: 0,
+            ..Header::default()
         };
         a.try_send(frame).unwrap();
         assert!(matches!(
@@ -351,5 +396,25 @@ mod tests {
         ));
         b.try_send(frame).unwrap();
         assert_eq!(b_rx.try_recv().unwrap().len, 1);
+    }
+}
+
+#[cfg(test)]
+mod arrival_tests {
+    use super::*;
+    #[test]
+    fn ap13_burst_marginals_and_sequences_match_independent_counts() {
+        for pattern in ["steady", "synchronized", "shifted", "phase-change"] {
+            let mut counts = [0u64; 8];
+            let mut previous = Duration::ZERO;
+            for id in 0..8192 {
+                let (stream, sequence, due, window) = scheduled(id, 8, false, pattern, 8000);
+                assert_eq!(sequence, counts[stream]);
+                counts[stream] += 1;
+                assert!(due >= previous && window > Duration::ZERO);
+                previous = due;
+            }
+            assert_eq!(counts, [1024; 8]);
+        }
     }
 }

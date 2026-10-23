@@ -10,6 +10,9 @@ fn main() -> Result<()> {
     let args = Args::parse()?;
     spike_support::validate(&args)?;
     let result = match args.get("case", "micro") {
+        #[cfg(feature = "mosaic-spike")]
+        "memory-replay" => spike_support::network::memory_replay(&args)?,
+        "adapter" => spike_support::network::adapter_probe(&args)?,
         "micro" => spike_support::micro(&args)?,
         "recovery" => spike_support::recovery::run()?,
         "returns" => spike_support::diagnostics::returns(&args)?,

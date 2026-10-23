@@ -100,6 +100,25 @@ fn main() -> Result<()> {
     assert!(
         control.allocations > 0 && control.deallocations > 0 && control.bytes_allocated >= 1234
     );
+    #[cfg(feature = "mosaic-spike")]
+    if args.get("case", "core") == "memory-policy" {
+        let probe = spike_support::network::memory_allocation_probe(GLOBAL, &args)?;
+        println!(
+            "{}",
+            json!({"positive_control":value(control),"memory_policy":probe})
+        );
+        return Ok(());
+    }
+    #[cfg(feature = "mosaic-spike")]
+    if args.get("case", "core") == "staged-ingress" {
+        let probe =
+            spike_support::network::staged_allocation_probe(GLOBAL, args.n("iterations", 10000))?;
+        println!(
+            "{}",
+            json!({"positive_control":value(control),"staged_ingress":probe})
+        );
+        return Ok(());
+    }
     #[cfg(feature = "local-branches-spike")]
     if args.get("case", "core") == "worker-fanout" {
         let probe = spike_support::network::worker_allocation_probe(GLOBAL, &args)?;
@@ -110,16 +129,20 @@ fn main() -> Result<()> {
         return Ok(());
     }
     #[cfg(feature = "mosaic-spike")]
-    if args.get("case", "core") == "local-queue" {
+    if matches!(args.get("case", "core"), "local-queue" | "adaptive-queue") {
         let probe = spike_support::network::local_queue_allocation_probe(
             GLOBAL,
             args.n("iterations", 10000),
+            args.get("case", "core") == "adaptive-queue",
         )?;
         println!(
             "{}",
             json!({"positive_control":value(control),"local_queue":probe})
         );
         return Ok(());
+    }
+    if args.get("case", "core") != "core" {
+        return Err("unknown or disabled allocation probe case".into());
     }
     let size = args.n("size", 1500);
     let backend = args.get("backend", "berry");

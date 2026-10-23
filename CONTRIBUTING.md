@@ -1355,7 +1355,8 @@ paths or constitute a production latency guarantee.
 
 `queue-backend=local` is opt-in, restricted to Mosaic scalar/batch fan-out with
 `return=local`. Prepared queues and all their access stay on the same worker;
-their handles are !Send + !Sync. `freshness-priority=off|oldest` defaults to off.
+their handles are !Send + !Sync. `freshness-priority=off|oldest` defaults to off;
+AP-11 separately adds the explicit adaptive mode.
 Oldest requires the local queue and explicit Skip. `freshness-min-age-ms` defaults
 to zero (any age qualifies), accepts 0..3600000, and is meaningful only with
 oldest. Reject unsupported combinations before creating resources.
@@ -1380,6 +1381,319 @@ Record occupancy high-water marks, queue age and cancellations without new core
 atomics. Delivery reports retain planned arrivals, all loss categories and each
 subscriber's latency. A freshness eviction is part of undelivered enqueued work,
 not an excuse to remove that work from the denominator.
+
+### AP-11: Adaptive freshness and dependency recovery
+
+The opt-in `freshness-priority=adaptive` adapter requires Mosaic, local queues,
+local return and scalar/batch fan-out with Skip. Existing defaults are unchanged.
+It preserves arena slots, grants and byte limits; controller/queue/timer metadata
+is external and included in PipelinePlan. Each subscriber has independent state.
+
+The prepared queue has physical capacity Q and a logical admission window W in
+1..=Q. Outstanding permits survive window contraction, so W is not an instantaneous
+occupancy invariant. The AP-10 credit equation always holds. Before admission and
+writer transfer, prune at most eight whole queued entries per pass, dropping
+payload before returning credit. Prune excess/aged prefixes, never writer batches.
+If work remains, reject admission or yield the writer; no hidden retry or growth.
+Expired hard deadlines terminate the connection before soft age pruning. Preserve
+survivor FIFO, original server-ready timestamps and SI-06 deadlines.
+
+Defaults: freshness-target-ms=20, slow-grace-ms=2000, write-stall-ms=500,
+keyframe-wait-ms=5000; durations accept 1..3600000. Only adaptive accepts these
+options; keyframe-wait-ms requires frame-dependencies=keyframe. The old minimum-age
+option belongs only to oldest. Existing max-frame-age-ms is not reset or relaxed.
+
+An existing writer task samples every 10 ms (skip missed ticks). Pressure is the
+maximum of capped ready-frame age/target and queue-pressure losses divided by
+initial queued rights plus offered recipient frames. Source/admission errors and
+dependency skips are not queue-pressure losses. A fixed-point fast average uses
+actual elapsed time and a 100 ms time constant. At >=60% pressure, accumulate bad
+milliseconds; at <=20%, repay twice elapsed time; otherwise retain the debt.
+Empty work repays debt. At the grace limit, close. At high pressure halve W, at
+most once per 100 ms; after debt zero and 500 ms continuously low pressure grow W
+by one per 100 ms. Catch-up batches contain one frame; restored batches use the
+configured bound, never more than eight. A pending write has a separate stall
+clock, reset only by positive byte writes. Idle input never starts that clock.
+All arithmetic is checked or saturating; this is bounded work, not a latency proof.
+
+Independent frames are the default. Optional keyframe metadata means an actual
+independent recovery point supplied by the source, not inferred from payload size.
+The explicit keyframe wire format uses an eight-byte ABPS/version-2 prefix before
+the existing handshake and extends the 20-byte header with an eight-byte per-stream
+sequence, one keyframe flag and three zero bytes. Reject incompatible versions,
+unknown flags, nonzero reserved bytes, duplicate/backward sequences and wrap.
+The ordinary version-1 handshake and frame format remain unchanged.
+
+A dependency gap moves the affected subscriber to AwaitKeyframe and invalidates
+outstanding permits through a nonwrapping recovery generation. Drain the old queue
+in bounded passes and reject dependent input until a new keyframe commits after
+cleanup. Failed keyframe commit cannot resume streaming; stale permits only release
+their own resources. Source gaps affect every subscriber, recipient losses affect
+only that subscriber. Already-owned writer batches may finish before recovery.
+The first gap starts a separate recovery timeout; further skipped frames do not
+reset it. Closing is terminal. No codec parsing or client acknowledgment is implied.
+
+Report pressure, debt, window/batch limit, recovery state and disconnect reason;
+separate age/window/dependency losses, failed replacement and cancellation. Count
+every offered recipient, including after disconnect; report delivery gaps alongside
+latency so selective loss cannot masquerade as freshness. A socket write is not
+client receipt. No core reference, return, or synchronization protocol changes.
+
+### AP-12: Measured adapter hot-path experiments
+
+Adapter experiments preserve arena layout, slots, grants, admission and the
+publish-before-refund protocol. Compare each candidate with a source-qualified
+baseline before combining changes. Prepared external storage includes scratch,
+queue/controller records, writer descriptors and timers; an experimental profile
+may grow this modeled total by at most 5% over its matched baseline. This is not an
+RSS limit. An optional external-memory-limit-bytes ceiling is checked by the typed
+plan before server resources are created. Include enabled sidecars and padding.
+
+The explicit ingress=staged-copy mode reuses one prepared input scratch allocation
+per stream, with capacity ingress-buffer-bytes in 1..=16384, defaulting to the
+existing min(max_payload, 16384). Only staged-copy accepts the size option. Prefetch
+may contain wire bytes for subsequent frames, but creates no queue or arena rights.
+After a validated header, queue permits still precede arena admission. Copy only
+the current frame's initialized prefix; Skip consumes exactly its remaining wire
+bytes, preserving the next header. EOF/cancellation must release owned permits and
+leases; unread staging ends with the connection and is never replayed. The staged
+buffer is external payload storage, accounted separately from arena metadata.
+
+Time observations may be shared only within a bounded synchronous operation, not
+across await, payload Drop or external callbacks. Every socket poll retains a fresh
+hard-deadline check, including after Pending. Timer reuse must retain cancellation
+and rearming semantics. Writer counters are worker-local observations: aggregate
+after tasks finish, retain completed writes through cancellation, and classify all
+remaining batch frames as deadline, policy, I/O, cancellation or unwind losses.
+Diagnostic counters are not ownership or synchronization rights. Wire formats,
+partial-frame ownership and the eight-frame batch bound remain unchanged.
+
+Unsafe queue storage is a separate disposable experiment, not a relaxation of the
+safe reference or adapter's unsafe prohibition. A prepared ring must preserve
+AP-10's credits, initialized-entry ownership and exactly-once moves/drops, expose
+no element reference across callbacks/await, and remain !Send + !Sync. Require
+Miri and sensitive negative controls before interpreting its performance. A
+negative or inconclusive experiment is a valid result, not grounds to weaken the
+contract or hide losses. AP-09's dedicated-host promotion gate remains open.
+
+### AP-13: Experimental adaptive memory and root generations
+
+This adapter experiment does not change core limits, errors, grants or Drop.
+It is opt-in, initially one Mosaic issuer with local queues/returns and scalar
+or batch fan-out. Every valid offered header contributes its rounded class
+charge to demand, including policy rejection. Policy rejection has its own
+reason; it is never a fabricated core exhaustion or contention error.
+
+A logical stream's hard limit spans ALL its root generations. Before each
+bounded acquisition attempt, sum its admitted observations across prepared
+records and check the full prospective charge against hard and soft budgets.
+The check and acquire are synchronous on the sole issuer, without await or
+callbacks. Between those observations remote returns can only decrease charges;
+the sum is a conservative upper bound, not a coherent snapshot. Shrinking soft
+targets creates debt; it does not refund, revoke or migrate old ownership.
+Reserved grants remain private to each domain until complete recycling.
+
+The first controller compares off, fixed and adaptive budgets. Explicit stream
+groups carry high/normal/low priority (weights 8:3:1). Weighted allocation gives
+10% of the soft total equally to active groups before weighted distribution of
+the remainder; strict priority serves higher groups first. Within a group,
+streams receive equal opportunities subject to demand and immutable hard limits.
+No minimum allocation promises delivery or overrides retained ownership.
+An adaptive admission may increase a stream/group target from the unassigned part
+of the soft total, after deducting all contraction debt. It cannot borrow another
+group's allocated target, increase a hard limit or acquire Reserved grant rights.
+This bounded demand activation avoids a full sampling-period blackout after idle;
+a stream already above its target cannot use it to evade contraction.
+Demand uses offered rounded bytes over 100 ms, EWMA plus twice mean absolute
+deviation over the configured retention horizon. An offered stream needs at least
+one observed full-slot quantum; otherwise a low-rate stream could be denied forever
+by a target smaller than its smallest request. Group aggregate and summed
+individual estimates are separate experiments. Admitted observation is a floor
+for estimated need, not a guaranteed allotment. Controller work is bounded by
+configured streams, groups and at most 32 roots.
+
+Elasticity is a separate research mode, not SI-16 recovery. Reserve a generation
+record and full layout bytes before preparation. All preparing, active, standby,
+draining, abandoned and unconfirmed generations consume the common ceiling,
+at most 125% of the original arena reservation. Prepared external production
+structures consume at most 105% of the matched original model. Detailed traces
+have an explicit independent fixed capacity; overflow makes evidence incomplete.
+Original reservation and external models, actual layouts, peak reservation,
+reservation-time integral and RSS are reported separately.
+Strict envelope validation also checks the selected initial active topology,
+including per-root Reserved grant rounding. Standby capacity and possible future
+growth cannot cover an initial envelope deficit.
+
+Use checked small-root catalogs (at most 5% or 10% of original reservation per
+root, including metadata/padding), at most 32 generation records and 64 runtime
+reconfiguration attempts. Initial topology and standby bytes are charged from
+startup. Preparation occurs on the issuer: compare measured cold preparation
+with explicitly paid standby capacity. A sustained physical deficit for one
+second AND observed return progress may request growth. Soft rejection alone
+or stalled ownership does not. Rate-limit changes to one per second. After five
+seconds of low occupancy, stop routing to an extra root and drain it, returning
+toward the original topology. Attempts, metadata, headroom and exhausted records
+are explicit refusal reasons; no unbounded retry.
+
+Change route only before a new frame's admission. Existing mutable input, views,
+writer ownership and final refunds retain their original domain/root identity.
+There is no replay, reconnect, payload relocation or keyframe-epoch reset.
+Close old admissions, retain old controls until drain, and refund reservation
+only after successful owner destruction and diagnostic release. Forget, timeout,
+Busy and abandonment do not authorize refund. Cold maintenance and preparation
+are measured separately from bounded admission; neither implies bounded latency.
+
+Compare independent, synchronized and shifted bursts with identical marginal
+loads; explicitly record priority delivery and starvation. A backing is charged
+once irrespective of fan-out. Queue eviction may release only one view and must
+not be counted as freed backing without evidence. First evaluate correlations
+using explicit groups and offline traces, without subscriber scans or extra
+atomics in remote Drop. Separate Reserved/Unreserved series and equal-peak-budget
+static baselines. Model, TCP, trace and timing evidence are distinct. Defaults
+stay unchanged; shared-host results do not pass AP-09's promotion gate.
+
+### AP-14: Shared soft opportunity and conservative admission observations
+
+`memory-policy=adaptive-shared` is an opt-in adapter experiment, initially one
+Mosaic root, Unreserved capacity and `elasticity=off`. Existing modes and defaults
+retain AP-13 semantics. Core errors, ownership, grants and remote Drop do not
+change. The complete arena is identical to the matched baseline; additional
+prepared external storage stays within AP-12/13's aggregate 5% allowance.
+
+The configured soft total is a shared admission ceiling. Check the prospective
+full-slot charge against both the logical hard limit and this total before one
+core attempt. Stream/group targets describe preferred shares, not private
+reservations. Spare opportunity may be borrowed across groups; targets do not
+increase on a loan. Debt is `max(admitted - target, 0)`, includes unfinished
+returns, and never authorizes another charge. Stream and group debt are different
+projections of the same bytes, not additive resources. Contraction cannot revoke
+ownership; failed admission cannot commit loan statistics or consume opportunity.
+
+ClassDepleted starts a pressure interval for that class; a confirmed shared-total
+refusal starts one for all classes. Neither BudgetExceeded nor Contended implies
+class pressure. During pressure an admission must start below BOTH its stream
+and group targets; it may cross a target by one whole slot, subject to the shared
+total and hard limit. This prevents fractional targets from making all requests
+impossible. Above-target owners retain their buffers but cannot increase debt
+in the affected class. Strict priority may still starve zero-target groups.
+`memory-pressure-ms=0|10|50|100` defaults to 10; zero is the unrestricted-loan
+control. Expiry uses the most recent issuer maintenance time (normally 10 ms,
+missed ticks skipped), not a per-frame clock or a wall-clock progress guarantee.
+Expiry only permits another policy check, never proves physical availability.
+
+All valid offered headers remain counted. `memory-demand=eligible` (default)
+estimates demand from requests reaching acquire after queue preflight, including
+policy/core rejections. `offered` is the explicit comparison. Shared-mode demand
+does not use retained charge as a floor for new entitlement; old retention stays
+charged as debt. Keep full-slot demand quanta and the 100 ms recomputation.
+Observed backing refunds derive from ledger observations plus successful charges,
+never from view drops, write completions or eviction counts.
+
+`memory-accounting=full|cached` defaults to cached for this mode only. The prepared
+issuer-local cache is an upper bound on every stream's admitted charge, with
+matching checked group/total sums. Charge it under a rollback guard before core
+admission; commit before returning a buffer. Only real ledger observations can
+lower it. No await, callback or second issuer admission can interleave this
+transition. Before rejecting based on cached counts, refresh at most once;
+maintenance also refreshes observations. No cached count authorizes reclamation.
+Errors and unwind restore the attempt's cache charge; completed final Drop
+continues to refund the actual ledger without touching the cache.
+
+A successful cached policy decision may be reused within that same transition
+when no policy or cache input has changed. A refresh invalidates the decision.
+Full-reading mode refreshes before its single decision; cached count-based
+refusals still require at most one refresh and recheck. Statistics alone are not
+policy inputs. Neither optimization changes errors or permits a second core attempt.
+
+Report offered/eligible/successful bytes separately, observed debt and retention
+peaks, policy/core refusal causes, pressure intervals, loan decisions and ledger
+read counts. Cache-based loan/peak observations may overestimate; they are not
+exact ownership snapshots. Use fixed-capacity traces outside native timing.
+Retain full-reading and unrestricted-loan controls, independent conservation
+models, failure-sensitive tests and measured before/after comparisons. Shared-host
+results do not change default policy or satisfy the dedicated-host promotion gate.
+
+### AP-15: Serial reuse of retained mutable ownership
+
+The opt-in `serial-adapter` feature enables a safe, runtime-independent wrapper
+around one already issued Mosaic `BufMut`. It adds no admission, freeze, clone,
+thaw, allocation fallback, atomic operation or storage layout. Construction and
+extraction transfer the existing allocation unchanged, including origin and charge.
+
+`SerialBuffer::begin` explicitly discards the preceding filled range and lends
+exclusive access to `SerialWrite`. Finishing the writer transfers that borrow to
+`SerialFrame`, which exposes only the filled initialized prefix. A frame's slices
+borrow the frame; they cannot escape it to permit concurrent overwrite. Guards
+are uniquely transferable (`Send`, not `Sync` or `Clone`), as is their buffer.
+Neither guards nor the adapter expose a mutable reference to the underlying lease.
+
+Writer/frame destruction clears filled length but does not refund capacity or
+admission. Begin clears it independently: safe forgetting of a guard cannot make
+the next frame expose the old filled range. Initialized length belongs to the
+retained lease, not a frame: initialized bytes may contain earlier contents and
+are not promised to be zeroed again. Fresh core acquisitions still start with
+zero initialized/filled lengths. Bounds and errors preserve OWN-01/02/03.
+
+One adapter pins one complete backing charge even when idle or empty. Processing
+N frames does not create N admissions or refunds. Domain close stops new core
+admissions, not access through the retained allocation; the application must stop
+its serial loop explicitly. Cancelled frame work leaves the charge retained if
+the adapter survives. Destroy remains blocked until all actual ownership ends;
+forgetting ownership never authorizes reclamation (MEM-01/02, LIFE-01/02).
+
+Begin, finish, guard destruction and metadata queries perform bounded constant
+work with no heap calls, waits, callbacks or new counters. Explicit copies and
+initialization remain bounded by requested bytes. This mode is for serial consumers,
+not independent asynchronous fan-out or a cache of free slots. Core Drop and
+TCP queue/freshness defaults are unchanged. Compare actual adapter overhead with
+direct retained leases and ordinary acquire/drop, including idle retention cost.
+
+### AP-16: Experimental admission pacing
+
+The admission-dynamics examples test stability separately from bounded capacity.
+They do not change core admission, atomic ordering, errors, Drop, or defaults.
+One issuer-local controller per root admits at most one pending header per stream
+(at most 64 streams). Pending headers own neither payload allocations nor queue
+permits. A prepared FIFO and one reusable issuer timer emit at most eight
+expiry/ready signals per pass; deadline discovery/removal scans at most the 64
+configured records. Cancellation removes exactly its registration generation;
+generations never wrap. FIFO deliberately permits head-of-line waiting for a large
+charge; smaller requests cannot consume its accumulating entitlement indefinitely.
+
+Pacing credit permits one attempt, not slot ownership or reclamation. Charge full
+class capacity once per successful backing acquisition, never once per view.
+Continuous bucket credit obeys `admitted_bytes(t1,t2) <= burst + rate*(t2-t1)`;
+keep fractional refill, cap idle accumulation, and start with a full bucket.
+The fixed-window tick control has the weaker window bound: at most one burst per
+epoch (arbitrary intervals may straddle two windows). It is single-class only,
+with its effective rate reported explicitly. Missed ticks do not accumulate.
+Neither refunds nor cached ledger observations refill pacing credit.
+
+After eligibility, queue preflight, the current memory policy and one core attempt
+execute without await. A guard restores provisional pacing credit on error/unwind
+before acquisition; success consumes it permanently even if later I/O fails.
+No pending reservation may survive an await. Existing core budget, availability
+and reference rights remain authoritative. The experimental comparison uses one
+core attempt in every mode, including pacing off, unlike ordinary adapter retries.
+
+The experimental absolute frame deadline begins at validated header receipt and
+covers waiting, payload I/O and writing. Waiting does not refresh it. Expiry with
+unread payload closes the connection; other Skip paths retain framing and the
+same deadline. Pacing expiry/cancellation is not a fabricated core error. Record
+scheduled-arrival latency and every source, queue, policy, core and I/O loss.
+The existing received-frame equations count complete consumed/drained payloads.
+Commit recipient loss decisions only at that boundary. Unread expiry and partial
+input are separate header/I/O observations, not invented received frames.
+The extended 100-recipient scalar/batch profile prepares its scratch; it does not
+extend branch limits. Remote writer workers never imply additional root capacity.
+
+Keep the arena identical between Mosaic variants and account controller metadata
+before setup. The external-growth promotion ceiling is 105%; instrumented traces
+are separate bounded evidence. Bytes compares logical quotas/queues, not identical
+physical reservation or RSS. Separate forced release bursts from a one-time phase
+perturbation, and logical replay from native timing. Do not infer publication time
+from Drop completion: reuse can precede the final refund. A source-qualified,
+matched, dedicated-host result is required before changing any default.
 
 ## Validation policy
 

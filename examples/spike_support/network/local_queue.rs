@@ -13,6 +13,7 @@ use tokio::time::Instant;
 struct Entry<T> {
     value: T,
     ready: Instant,
+    deadline: Option<Instant>,
 }
 #[derive(Clone, Copy)]
 enum Stage {
@@ -30,6 +31,7 @@ struct State<T> {
     receiver_open: bool,
     waker: Option<Waker>,
     min_age: Option<Duration>,
+    adaptive: Option<adaptive::Controller>,
     enqueued: u64,
     transferred: u64,
     evicted: u64,
@@ -69,6 +71,8 @@ struct Right<T> {
     stage: Stage,
     replacement: bool,
     active: bool,
+    epoch: u64,
+    keyframe: bool,
 }
 impl<T> Right<T> {
     fn new(state: &Shared<T>, stage: Stage, replacement: bool) -> Self {
@@ -77,6 +81,8 @@ impl<T> Right<T> {
             stage,
             replacement,
             active: true,
+            epoch: state.borrow().adaptive.as_ref().map_or(0, |a| a.epoch),
+            keyframe: false,
         }
     }
     fn transition(&mut self, stage: Stage) {
@@ -93,6 +99,12 @@ impl<T> Drop for Right<T> {
         }
         let waker = {
             let mut s = self.state.borrow_mut();
+            if matches!(self.stage, Stage::Reserved)
+                && let Some(a) = &mut s.adaptive
+                && self.epoch == a.epoch
+            {
+                a.gap(Instant::now());
+            }
             *s.counter(self.stage) -= 1;
             if self.replacement {
                 s.failed_replacements += 1;
@@ -108,6 +120,7 @@ pub(super) struct Permit<T>(Right<T>);
 pub(super) struct Delivery<T> {
     value: Option<T>,
     right: Right<T>,
+    ready: Instant,
 }
 impl<T> Drop for Delivery<T> {
     fn drop(&mut self) {
@@ -122,6 +135,7 @@ impl<T> Drop for Delivery<T> {
 pub(super) enum Rejected {
     Full,
     Closed,
+    Policy,
 }
 
 pub(super) fn channel<T>(
@@ -139,6 +153,7 @@ pub(super) fn channel<T>(
         receiver_open: true,
         waker: None,
         min_age,
+        adaptive: None,
         enqueued: 0,
         transferred: 0,
         evicted: 0,
@@ -157,7 +172,79 @@ pub(super) fn storage_model_bytes<T>(capacity: usize) -> Option<usize> {
         .checked_add(std::mem::size_of::<State<T>>())?
         .checked_add(2 * std::mem::size_of::<usize>()) // Rc counters, excluding allocator rounding
 }
+// AP-11: an eviction remains a failed replacement on error or unwind before
+// a reservation guard takes responsibility; one attempt may remove several frames.
+struct ReplacementAttempt<T> {
+    state: Shared<T>,
+    before: u64,
+    handed_off: bool,
+}
+impl<T> Drop for ReplacementAttempt<T> {
+    fn drop(&mut self) {
+        if !self.handed_off {
+            let mut s = self.state.borrow_mut();
+            if s.evicted > self.before {
+                s.failed_replacements += 1;
+            }
+        }
+    }
+}
 impl<T> Sender<T> {
+    pub fn configure(&self, policy: adaptive::AdaptivePolicy) {
+        let mut s = self.0.borrow_mut();
+        s.adaptive = Some(adaptive::Controller::new(
+            policy,
+            s.capacity,
+            Instant::now(),
+        ));
+    }
+    pub fn gap(&self) {
+        if let Some(a) = &mut self.0.borrow_mut().adaptive {
+            a.gap(Instant::now());
+        }
+    }
+    pub fn reserve_frame(&self, keyframe: bool) -> std::result::Result<Permit<T>, Rejected> {
+        if self.0.borrow().adaptive.is_none() {
+            return self.try_reserve();
+        }
+        {
+            let mut s = self.0.borrow_mut();
+            s.adaptive.as_mut().unwrap().offer(Instant::now());
+        }
+        let before = self.0.borrow().evicted;
+        let mut attempt = ReplacementAttempt {
+            state: self.0.clone(),
+            before,
+            handed_off: false,
+        };
+        maintain(&self.0, true);
+        let replaced = self.0.borrow().evicted > before;
+        let mut s = self.0.borrow_mut();
+        let used = s.used();
+        let open = s.receiver_open;
+        let a = s.adaptive.as_mut().unwrap();
+        if !open || a.closed.is_some() {
+            return Err(Rejected::Closed);
+        }
+        if a.cleaning || (a.waiting && !keyframe) {
+            a.dependency_skips += 1;
+            return Err(Rejected::Policy);
+        }
+        if used >= a.window {
+            a.policy_rejections += 1;
+            a.pressure_loss();
+            a.gap(Instant::now());
+            return Err(Rejected::Policy);
+        }
+        s.reserved += 1;
+        s.high_water = s.high_water.max(s.used());
+        drop(s);
+        let mut right = Right::new(&self.0, Stage::Reserved, false);
+        right.keyframe = keyframe;
+        right.replacement = replaced;
+        attempt.handed_off = true;
+        Ok(Permit(right))
+    }
     pub fn try_reserve(&self) -> std::result::Result<Permit<T>, Rejected> {
         let old = {
             let mut s = self.0.borrow_mut();
@@ -167,6 +254,7 @@ impl<T> Sender<T> {
             if s.used() < s.capacity {
                 s.reserved += 1;
                 s.high_water = s.high_water.max(s.used());
+                drop(s);
                 return Ok(Permit(Right::new(&self.0, Stage::Reserved, false)));
             }
             let now = Instant::now();
@@ -204,12 +292,28 @@ impl<T> Drop for Sender<T> {
     }
 }
 impl<T> Permit<T> {
-    pub fn send(mut self, value: T) {
-        if !self.0.state.borrow().receiver_open {
+    pub fn send(self, value: T) {
+        self.send_at(value, Instant::now(), None);
+    }
+    fn send_at(mut self, value: T, ready: Instant, deadline: Option<Instant>) {
+        let valid = {
+            let s = self.0.state.borrow();
+            s.receiver_open
+                && s.adaptive.as_ref().is_none_or(|a| {
+                    a.closed.is_none()
+                        && a.epoch == self.0.epoch
+                        && !a.cleaning
+                        && (!a.waiting || self.0.keyframe)
+                })
+        };
+        if !valid {
             {
                 let mut s = self.0.state.borrow_mut();
                 s.enqueued += 1;
                 s.cancelled += 1;
+                if let Some(a) = &mut s.adaptive {
+                    a.stale_commits += 1;
+                }
             }
             // Never return a credit before dropping rejected ownership.
             drop(value);
@@ -220,8 +324,14 @@ impl<T> Permit<T> {
             assert!(s.entries.len() < s.capacity && s.reserved > 0);
             s.entries.push_back(Entry {
                 value,
-                ready: Instant::now(),
+                ready,
+                deadline,
             });
+            if self.0.keyframe
+                && let Some(a) = &mut s.adaptive
+            {
+                a.committed_key();
+            }
             s.reserved -= 1;
             s.enqueued += 1;
             self.0.active = false;
@@ -238,7 +348,9 @@ impl<T> Receiver<T> {
         let entry = s.entries.pop_front()?;
         s.age(entry.ready, Instant::now());
         s.transferring += 1;
+        drop(s);
         Some(Delivery {
+            ready: entry.ready,
             value: Some(entry.value),
             right: Right::new(&self.0, Stage::Transfer, false),
         })
@@ -280,6 +392,7 @@ impl<T> Observer<T> {
             "storage_model_bytes":storage_model_bytes::<T>(s.entries.capacity()),
             "free":s.capacity-s.used(),"reserved":s.reserved,"queued":s.entries.len(),
             "transferring":s.transferring,"releasing":s.releasing,
+            "adaptive":s.adaptive.as_ref().map(adaptive::Controller::json),
             "enqueued":s.enqueued,"transferred":s.transferred,"evicted":s.evicted,
             "failed_replacements":s.failed_replacements,"cancelled":s.cancelled,
             "rejected_full":s.rejected_full,"occupancy_high_water":s.high_water,
@@ -289,6 +402,9 @@ impl<T> Observer<T> {
 }
 impl writer::Delivery for Delivery<Message> {
     type Frame = WriterFrame;
+    fn ready(&self) -> Option<Instant> {
+        Some(self.ready)
+    }
     fn into_batch(mut self, dst: &mut Option<Message<WriterFrame>>) {
         assert!(dst.is_none());
         *dst = Some(self.value.take().unwrap().into_writer());
@@ -302,11 +418,127 @@ where
 {
     type Item = Delivery<T>;
     fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        maintain(&self.0, false);
+        if blocked(&self.0) {
+            if self
+                .0
+                .borrow()
+                .adaptive
+                .as_ref()
+                .is_some_and(|a| a.closed.is_some())
+            {
+                return Poll::Ready(None);
+            }
+            cx.waker().wake_by_ref();
+            return Poll::Pending;
+        }
         self.poll(cx)
     }
+    fn close_reason(&self) -> Option<adaptive::CloseReason> {
+        self.0.borrow().adaptive.as_ref().and_then(|a| a.closed)
+    }
+    fn adaptive(&self) -> bool {
+        self.0.borrow().adaptive.is_some()
+    }
+    fn maintain(&mut self) -> Option<adaptive::CloseReason> {
+        maintain(&self.0, false);
+        self.0.borrow().adaptive.as_ref().and_then(|a| a.closed)
+    }
+    fn batch_limit(&self, max: usize) -> usize {
+        let mut s = self.0.borrow_mut();
+        s.adaptive.as_mut().map_or(max, |a| {
+            let n = a.batch_limit(max);
+            a.last_batch_limit = Some(n);
+            n
+        })
+    }
+    fn batch_state(&mut self, ready: Option<Instant>, deadline: Option<Instant>) {
+        if let Some(a) = &mut self.0.borrow_mut().adaptive {
+            a.batch(ready, deadline, Instant::now());
+        }
+    }
+    fn written(&mut self, bytes: usize) {
+        if let Some(a) = &mut self.0.borrow_mut().adaptive {
+            a.progress(bytes, Instant::now());
+        }
+    }
     fn try_recv(&mut self) -> Option<Self::Item> {
+        maintain(&self.0, false);
+        if blocked(&self.0) {
+            return None;
+        }
         self.pop()
     }
+}
+
+// AP-11: every removed payload is guarded before Drop, outside the queue borrow.
+fn maintain<T>(state: &Shared<T>, reserving: bool) {
+    if state.borrow().adaptive.is_none() {
+        return;
+    }
+    let now = Instant::now();
+    {
+        let mut s = state.borrow_mut();
+        let head = s.entries.front().map(|e| (e.ready, e.deadline));
+        let used = s.used();
+        let a = s.adaptive.as_mut().unwrap();
+        if let Some((ready, deadline)) = head {
+            a.age(ready, now);
+            if deadline.is_some_and(|d| now >= d) {
+                a.close(adaptive::CloseReason::FrameDeadline);
+            }
+        }
+        a.sample(now, used);
+    }
+    for _ in 0..8 {
+        let old = {
+            let mut s = state.borrow_mut();
+            let used = s.used();
+            let ready = s.entries.front().map(|e| e.ready);
+            let a = s.adaptive.as_mut().unwrap();
+            if a.closed.is_some() {
+                break;
+            }
+            let Some(ready) = ready else {
+                a.cleaning = false;
+                break;
+            };
+            if a.cleaning {
+                a.dependency_evictions += 1;
+            } else if now.saturating_duration_since(ready) >= a.policy.target {
+                a.age_evictions += 1;
+                a.pressure_loss();
+                a.gap(now);
+            } else if used > a.window || (reserving && used == a.window) {
+                a.window_evictions += 1;
+                a.pressure_loss();
+                a.gap(now);
+            } else {
+                break;
+            }
+            s.evicted += 1;
+            s.releasing += 1;
+            s.entries.pop_front().unwrap().value
+        };
+        let right = Right::new(state, Stage::Releasing, false);
+        drop(old);
+        drop(right);
+    }
+    let mut s = state.borrow_mut();
+    if s.entries.is_empty() {
+        s.adaptive.as_mut().unwrap().cleaning = false;
+    }
+}
+fn blocked<T>(state: &Shared<T>) -> bool {
+    let s = state.borrow();
+    s.adaptive.as_ref().is_some_and(|a| {
+        a.closed.is_some()
+            || a.cleaning
+            || s.used() > a.window
+            || s.entries.front().is_some_and(|e| {
+                Instant::now().saturating_duration_since(e.ready) >= a.policy.target
+            })
+    })
 }
 
 // The common ingress dispatch keeps the ordinary Tokio queue unchanged.
@@ -324,6 +556,20 @@ pub(super) enum IngressPermit<'a> {
     Local(Permit<Message>),
 }
 impl IngressSender {
+    pub fn gap(&self) {
+        if let Self::Local(s) = self {
+            s.gap();
+        }
+    }
+    pub fn reserve_frame(
+        &self,
+        keyframe: bool,
+    ) -> std::result::Result<IngressPermit<'_>, Rejected> {
+        match self {
+            Self::Local(s) => s.reserve_frame(keyframe).map(IngressPermit::Local),
+            _ => self.try_reserve(),
+        }
+    }
     pub fn try_reserve(&self) -> std::result::Result<IngressPermit<'_>, Rejected> {
         match self {
             Self::Tokio(s) => s
@@ -339,9 +585,15 @@ impl IngressSender {
 }
 impl IngressPermit<'_> {
     pub fn send(self, value: Message) {
+        self.send_ready(value, Instant::now());
+    }
+    pub fn send_ready(self, value: Message, ready: Instant) {
         match self {
             Self::Tokio(p) => p.send(value),
-            Self::Local(p) => p.send(value),
+            Self::Local(p) => {
+                let deadline = value.deadline;
+                p.send_at(value, ready, deadline);
+            }
         }
     }
 }
@@ -353,6 +605,7 @@ mod tests;
 pub(super) fn allocation_probe(
     allocator: &stats_alloc::StatsAlloc<std::alloc::System>,
     iterations: usize,
+    adaptive: bool,
 ) -> Result<Value> {
     let fixture = Fixture::new(
         "mosaic",
@@ -365,16 +618,30 @@ pub(super) fn allocation_probe(
     )?;
     let origin = fixture.open(256)?;
     let (tx, mut rx, observer) = channel(2, Some(Duration::ZERO));
+    if adaptive {
+        tx.configure(adaptive::AdaptivePolicy {
+            target: Duration::from_secs(3600),
+            grace: Duration::from_secs(3600),
+            stall: Duration::from_secs(3600),
+            key_wait: Duration::from_secs(3600),
+            keyed: false,
+        });
+    }
     let region = stats_alloc::Region::new(allocator);
     for _ in 0..iterations {
         let mut cx = Context::from_waker(Waker::noop());
         assert!(rx.poll(&mut cx).is_pending());
         for id in 0..3 {
-            let permit = tx.try_reserve().unwrap();
+            let permit = tx.reserve_frame(false).unwrap();
             let mut lease = origin.acquire(4)?;
             lease.put(&[id as u8; 4]);
             permit.send(Message {
-                header: Header { id, len: 4, due: 0 },
+                header: Header {
+                    id,
+                    len: 4,
+                    due: 0,
+                    ..Header::default()
+                },
                 frame: lease.freeze().into(),
                 deadline: None,
             });
@@ -397,3 +664,6 @@ pub(super) fn allocation_probe(
         "allocations":costs.allocations,"deallocations":costs.deallocations,"reallocations":costs.reallocations}),
     )
 }
+
+#[cfg(test)]
+mod adaptive_tests;

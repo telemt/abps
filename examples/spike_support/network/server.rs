@@ -63,6 +63,8 @@ impl Cohort {
 }
 
 struct Managed {
+    #[cfg(feature = "mosaic-spike")]
+    memory: Option<std::rc::Rc<std::cell::RefCell<memory::Bank>>>,
     preparing: bool,
     fixture: Option<Fixture>,
     permit: Option<Permit>,
@@ -71,6 +73,23 @@ impl Managed {
     fn finish(&mut self, timeout: Duration) -> (bool, Value) {
         if let Some(p) = &self.permit {
             p.draining();
+        }
+        #[cfg(feature = "mosaic-spike")]
+        if let Some(bank) = self.memory.take() {
+            let mut bank = bank.borrow_mut();
+            let destroyed = bank.shutdown();
+            let memory = bank.json();
+            if let Some(p) = self.permit.take() {
+                if destroyed {
+                    p.destroyed();
+                } else {
+                    p.abandoned();
+                }
+            }
+            return (
+                destroyed,
+                json!({"admitted":if destroyed{0}else{memory["observed_admitted_at_abandon"].as_u64().unwrap_or(0)},"available":0,"total_slots":0,"scope":"elastic owner teardown","memory":memory}),
+            );
         }
         if self.preparing && self.fixture.is_none() {
             drop(self.permit.take()); // interrupted prepare: no destruction proof
@@ -100,8 +119,16 @@ async fn accept(
     listener: &tokio::net::TcpListener,
     stream: usize,
     subscriber: usize,
+    keyed: bool,
 ) -> Result<Socket> {
     let (mut socket, _) = listener.accept().await?;
+    if keyed {
+        let mut version = [0; 8];
+        socket.read_exact(&mut version).await?;
+        if version != WIRE_V2 {
+            return Err("incompatible frame protocol".into());
+        }
+    }
     let mut handshake = [0; 8];
     socket.read_exact(&mut handshake).await?;
     if u32::from_be_bytes(handshake[..4].try_into().unwrap()) as usize != stream
@@ -163,6 +190,20 @@ impl Worker {
                 }
                 return Err("injected prepare failure".into());
             }
+            #[cfg(feature = "mosaic-spike")]
+            if let Some(plan) = &self.plan.memory {
+                managed.preparing = true;
+                managed.memory = Some(memory::Bank::prepare(plan.clone())?);
+                managed.preparing = false;
+                if let Some(p) = &managed.permit {
+                    p.active();
+                }
+                return runtime.block_on(local.run_until(self.serve(
+                    None,
+                    managed.permit.as_ref().map(Permit::identity),
+                    managed.memory.as_ref(),
+                )));
+            }
             managed.preparing = true;
             let f = Fixture::prepared_branch_layout(
                 self.args.get("backend", "berry"),
@@ -201,12 +242,17 @@ impl Worker {
         runtime.block_on(local.run_until(self.serve(
             managed.fixture.as_ref(),
             managed.permit.as_ref().map(Permit::identity),
+            #[cfg(feature = "mosaic-spike")]
+            None,
         )))
     }
     async fn serve(
         &mut self,
         f: Option<&Fixture>,
         _generation: Option<super::super::supervisor::Identity>,
+        #[cfg(feature = "mosaic-spike")] memory_bank: Option<
+            &std::rc::Rc<std::cell::RefCell<memory::Bank>>,
+        >,
     ) -> Result<Value> {
         let worker = self.id;
 
@@ -215,25 +261,41 @@ impl Worker {
             let mut buffers = Vec::new();
             let mut local_jobs = Vec::new();
             let mut local_observers = Vec::new();
-            if let (Some(listener), Some(fixture)) = (self.listener.take(), f) {
+            if let Some(listener) = self.listener.take() {
                 listener.set_nonblocking(true)?;
                 let listener = tokio::net::TcpListener::from_std(listener)?;
                 for stream in
                     (0..self.settings.streams).filter(|s| s % self.settings.workers == worker)
                 {
-                    let socket = accept(&listener, stream, self.settings.fanout).await?;
-                    let origin = {
+                    let socket = accept(
+                        &listener,
+                        stream,
+                        self.settings.fanout,
+                        self.settings.keyed(),
+                    )
+                    .await?;
+                    let ordinary = || -> Result<memory::StreamOrigin> {
                         let _guard = self
                             .domain_setup
                             .lock()
                             .map_err(|_| "domain setup panicked")?;
+                        let fixture = f.ok_or("missing fixture")?;
                         let d = self.plan.domain(stream);
-                        if self.settings.capacity_policy == CapacityPolicy::Reserved {
+                        let origin = if self.settings.capacity_policy == CapacityPolicy::Reserved {
                             fixture.open_reserved(d.limit, &d.grants)?
                         } else {
                             fixture.open(d.limit)?
-                        }
+                        };
+                        Ok(origin.into())
                     };
+                    #[cfg(feature = "mosaic-spike")]
+                    let origin = if let Some(bank) = memory_bank {
+                        memory::StreamOrigin::Managed(memory::Bank::open(bank)?)
+                    } else {
+                        ordinary()?
+                    };
+                    #[cfg(not(feature = "mosaic-spike"))]
+                    let origin = ordinary()?;
                     let mut subscribers = Vec::with_capacity(self.settings.fanout);
                     #[cfg(feature = "local-branches-spike")]
                     let (mut worker_ingress, mut group) = if self.settings.worker_branches {
@@ -252,7 +314,8 @@ impl Worker {
                         worker
                     };
                     for subscriber in 0..self.settings.fanout {
-                        let output = accept(&listener, stream, subscriber).await?;
+                        let output =
+                            accept(&listener, stream, subscriber, self.settings.keyed()).await?;
                         let sr = socket2::SockRef::from(&output);
                         if let Some(n) = self.settings.send_buffer_bytes {
                             sr.set_send_buffer_size(n)?;
@@ -271,6 +334,9 @@ impl Worker {
                                 self.settings.queue,
                                 self.settings.freshness_min_age,
                             );
+                            if let Some(policy) = self.settings.adaptive {
+                                queue.configure(policy);
+                            }
                             local_jobs.push((output, receiver, stop));
                             local_observers.push((stream, subscriber, observer));
                             subscribers.push(Subscriber {
@@ -307,7 +373,7 @@ impl Worker {
                         subscribers,
                         #[cfg(feature = "local-branches-spike")]
                         worker_fanout: worker_ingress,
-                        scratch: vec![0; self.settings.max_payload().min(16384)].into_boxed_slice(),
+                        scratch: vec![0; self.settings.scratch_bytes()].into_boxed_slice(),
                     });
                 }
             }
@@ -390,6 +456,8 @@ impl Worker {
             sources.spawn_local(ingress::run(session, self.settings.clone()));
         }
         let _close_before_tasks = CloseOnExit(f);
+        #[cfg(feature = "mosaic-spike")]
+        let _memory_close = MemoryClose(memory_bank);
         let mut stats = Vec::new();
         let mut cancelled = 0;
         let load_deadline =
@@ -431,7 +499,11 @@ impl Worker {
                         *writer_errors.entry(format!("{:?}", error.kind())).or_default() += 1;
                     }
                 },
-                _ = maintenance.tick() => { if let Some(f) = f { f.maintenance(); } },
+                _ = maintenance.tick() => {
+                    if let Some(f)=f {f.maintenance();}
+                    #[cfg(feature="mosaic-spike")]
+                    if let Some(bank)=memory_bank {bank.borrow_mut().maintenance(written.completed.load(Ordering::Relaxed));}
+                },
                 r = progress.changed() => { r?; },
                 _ = tokio::time::sleep_until(deadline) => {
                     if drain_deadline.is_none() { return Err("ingress/loadgen timed out".into()); }
@@ -449,6 +521,7 @@ impl Worker {
             json!({"stream":stream,"subscriber":subscriber,"metrics":observer.json()})).collect();
         Ok(
             json!({"worker":worker,"streams":[],"writer_completed":written.completed.load(Ordering::Relaxed),
+                    "writer_aborted": {"deadline":written.aborted_deadline.load(Ordering::Relaxed),"policy":written.aborted_policy.load(Ordering::Relaxed),"io":written.aborted_io.load(Ordering::Relaxed),"cancel":written.aborted_cancel.load(Ordering::Relaxed),"unwind":written.aborted_unwind.load(Ordering::Relaxed)},
                     "write_api_calls":written.write_calls.load(Ordering::Relaxed),"expired_writers":written.expired.load(Ordering::Relaxed),
                     "cancelled_writers":cancelled,"writer_io_errors":writer_errors,"send_buffers":buffers,"local_queues":local_queues}),
         )
@@ -456,6 +529,8 @@ impl Worker {
 
     fn run(mut self) -> Value {
         let mut managed = Managed {
+            #[cfg(feature = "mosaic-spike")]
+            memory: None,
             preparing: false,
             fixture: None,
             permit: self.permit.take(),
@@ -509,6 +584,12 @@ pub fn run(args: &Args) -> Result<Value> {
         args.get("backend", "berry"),
     )?);
     let reservations: Vec<_> = plan.roots.iter().map(|r| r.reservation_bytes).collect();
+    #[cfg(feature = "mosaic-spike")]
+    let reservations = if let Some(p) = &plan.memory {
+        vec![p.ceiling]
+    } else {
+        reservations
+    };
     let initial = reservations
         .iter()
         .try_fold(0usize, |n, &r| n.checked_add(r))
@@ -555,6 +636,8 @@ pub fn run(args: &Args) -> Result<Value> {
             .collect::<std::io::Result<_>>()?;
         let mut permits = permits.into_iter();
         let mut shared_managed = Managed {
+            #[cfg(feature = "mosaic-spike")]
+            memory: None,
             preparing: false,
             fixture: None,
             permit: if shared { permits.next() } else { None },
@@ -694,6 +777,8 @@ mod tests {
     fn interrupted_prepare_is_unconfirmed_not_destroyed() {
         let registry = Registry::new(1, 100, 1, 1).unwrap();
         let mut managed = Managed {
+            #[cfg(feature = "mosaic-spike")]
+            memory: None,
             preparing: true,
             fixture: None,
             permit: registry.reserve(&[100], false).unwrap().pop(),
@@ -829,6 +914,7 @@ mod worker_regressions {
                                     len: 1,
                                     id: stream as u64,
                                     due: 0,
+                                    ..Header::default()
                                 }
                                 .encode(),
                             );
@@ -905,5 +991,16 @@ mod worker_regressions {
     #[test]
     fn normal_remote_return_shutdown_destroys_all_roots() {
         exercise(Fault::None, false, false);
+    }
+}
+
+#[cfg(feature = "mosaic-spike")]
+struct MemoryClose<'a>(Option<&'a std::rc::Rc<std::cell::RefCell<memory::Bank>>>);
+#[cfg(feature = "mosaic-spike")]
+impl Drop for MemoryClose<'_> {
+    fn drop(&mut self) {
+        if let Some(b) = self.0 {
+            b.borrow_mut().close();
+        }
     }
 }
