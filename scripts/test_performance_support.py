@@ -30,6 +30,30 @@ def fixture():
 
 
 class PerformanceContracts(unittest.TestCase):
+    def test_tokio_receipts_reject_lost_and_duplicated_ownership(self):
+        server, client = fixture()
+        server['pipeline_plan'] = {'queue_backend':'tokio', 'queue_accounting':'receipts-v1'}
+        w = server['workers'][0]
+        w['writer_aborted'] = dict.fromkeys(('deadline','policy','io','cancel','unwind'),0)
+        w['tokio_queues'] = [dict(stream=0, subscriber=0, metrics=dict(enqueued=1, transferred=1, cancelled=0))]
+        self.assertEqual(v.validate_issuer_flow(server,client)['unclassified_uncompleted_enqueued'], 0)
+        for name in ['enqueued','transferred','cancelled']:
+            bad=copy.deepcopy(server)
+            bad['workers'][0]['tokio_queues'][0]['metrics'][name]+=1
+            with self.assertRaises(v.MeasurementError): v.validate_issuer_flow(bad,client)
+        for name in ['tokio_queues','writer_aborted']:
+            bad=copy.deepcopy(server);del bad['workers'][0][name]
+            with self.assertRaises(v.MeasurementError): v.validate_issuer_flow(bad,client)
+        # A cancelled queue entry remains an offered loss, not a writer abort.
+        for k in ['received','accepted','enqueued','dispatched_recipient_rights','locally_enqueued']:
+            w['streams'][0][k]+=1
+        for k in ['planned','attempted','enqueued','sent']: client['source'][k]+=1
+        w['tokio_queues'][0]['metrics'].update(enqueued=2, cancelled=1)
+        result=v.validate_issuer_flow(server,client)
+        self.assertEqual(result['cancelled_queued'],1)
+        self.assertEqual(result['delivery_fraction'],.5)
+        self.assertEqual(result['unclassified_uncompleted_enqueued'],0)
+
     def test_writer_abort_schema_cannot_be_partially_missing(self):
         server, client = fixture()
         # A writer-only worker need not own a domain, but it must report the

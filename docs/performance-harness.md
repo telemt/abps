@@ -95,7 +95,10 @@ delivered = timely_delivered + expired_delivered
 ```
 
 The older reference schedule also reports `not_attempted_after_stop` explicitly.
-The two delivery residuals do not identify the cause of a missing delivery.
+New ordinary Tokio queue plans advertise `queue_accounting=receipts-v1` and
+reconcile queued cancellation separately from writer aborts after cohort quiescence.
+Legacy server-ownership residuals remain unclassified. The delivery residual does
+not identify the cause of a missing client observation.
 `network_bytes_per_planned_s` and `useful_bytes_per_planned_s` divide by the planned
 source window. Actual source completion and load-plus-drain times are separate.
 No loss category is removed to improve a reported success rate.

@@ -5,6 +5,21 @@ use super::{controller::*, *};
 use abps_reference::mosaic;
 use std::{cell::RefCell, rc::Rc};
 const ROOTS: usize = 32;
+
+fn class_charge(classes: &[ClassConfig], size: usize) -> Option<usize> {
+    // AP-14: preserve first-fit charging. The measured large-table benefit was
+    // reliable at 64 classes; smaller tables retain the existing linear walk.
+    if classes.len() < 64 {
+        classes
+            .iter()
+            .find(|c| c.capacity >= size)
+            .map(|c| c.capacity)
+    } else {
+        classes
+            .get(classes.partition_point(|c| c.capacity < size))
+            .map(|c| c.capacity)
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
     Free,
@@ -322,12 +337,7 @@ impl Bank {
         result
     }
     fn charge(&self, size: usize) -> Option<usize> {
-        self.plan
-            .config
-            .classes
-            .iter()
-            .find(|c| c.capacity >= size)
-            .map(|c| c.capacity)
+        class_charge(&self.plan.config.classes, size)
     }
     pub(super) fn clock_origin(&self) -> Instant {
         self.start
@@ -407,18 +417,25 @@ impl Bank {
             self.policy.offer(stream, charge);
         }
         let cached = self.plan.options.cached_accounting;
-        let first = shared.check(&self.policy, stream, class, charge);
+        let first = cached.then(|| shared.check(&self.policy, stream, class, charge));
         // Closed is independent of observations. Every other count-based
         // rejection gets one real refresh, not another core admission attempt.
-        let refresh = !cached || (first.is_err() && first != Err("ClosedStream"));
+        let refresh = first.is_none_or(|r| r.is_err() && r != Err("ClosedStream"));
         if refresh {
             let values = self.admitted();
             self.shared.as_mut().unwrap().refresh(values, &self.policy);
-        } else if first.is_ok() {
+        } else if first.is_some_and(|r| r.is_ok()) {
             self.shared.as_mut().unwrap().cache_passes += 1;
         }
         let shared = self.shared.as_mut().unwrap();
-        let decision = match shared.check(&self.policy, stream, class, charge) {
+        // AP-14: only the cache-pass statistic changed since a reused decision.
+        // A refresh invalidates it. No await/callback or second admission occurs.
+        let checked = if refresh {
+            shared.check(&self.policy, stream, class, charge)
+        } else {
+            first.expect("cached decision without refresh")
+        };
+        let decision = match checked {
             Ok(d) => d,
             Err(reason) => {
                 shared.refused(reason);

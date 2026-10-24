@@ -193,14 +193,18 @@ class Runner:
         if key in self.done:
             require(self.done[key]["args"] == args, key, "configuration changed; use a new output directory")
             return self.done[key]
+        case = args.get("case", "tcp")
+        require(case in ("tcp", "admission-tcp"), key, "unsupported TCP case")
         needed = int(args.get("threads", 1)) * (2 if args.get("return", "local") == "remote" else 1)
+        if case == "admission-tcp" and args.get("return", "local") == "remote":
+            needed = int(args.get("threads", 1)) + int(args.get("return-workers", 1))
         groups = [self.options.server_cpus, self.options.generator_cpus, self.options.reader_cpus]
         selected = [cpu for group in groups for cpu in group]
         physical_ok = bool(selected) and (getattr(self.options,"smt",False) or len(physical_cpus(selected)) == len(selected))
         if len(groups[0]) < needed or not all(groups) or not physical_ok or any(set(groups[i]) & set(groups[j]) for i in range(3) for j in range(i)):
             return self.save(key, dict(args=args, status="unvalidated", reason="insufficient disjoint server/generator/reader CPUs"))
         server_binary = self.options.server_binary or (self.bin / "spike_probe")
-        server_args = dict(args, case="tcp", role="server", cpus=",".join(map(str, groups[0])))
+        server_args = dict(args, case=case, role="server", cpus=",".join(map(str, groups[0])))
         server_cmd = ["taskset", "-c", server_args["cpus"], str(server_binary)]
         server_cmd += [f"--{k}={v}" for k, v in server_args.items()]
         prefix = self.options.server_prefix
@@ -215,14 +219,14 @@ class Runner:
         try:
             # Only the server binary computes the canonical plan. This role must
             # succeed before any socket/runtime/arena resources are started.
-            plan_cmd = [str(server_binary)] + [f"--{k}={v}" for k, v in dict(args, case="tcp", role="plan").items()]
+            plan_cmd = [str(server_binary)] + [f"--{k}={v}" for k, v in dict(args, case=case, role="plan").items()]
             record["commands"].append(plan_cmd)
             plan_output = self.output / f"{key}.plan.stdout"
             with plan_output.open("w") as po, (self.output / f"{key}.plan.stderr").open("w") as pe:
                 plan_run = subprocess.run(plan_cmd, cwd=ROOT, text=True, stdout=po, stderr=pe, timeout=30)
             record["plan_exit_code"] = plan_run.returncode
             plan_run.check_returncode()
-            expected_plan = validate_probe_envelope(json.loads(plan_output.read_text()), dict(args,case="tcp",role="plan"))["pipeline_plan"]
+            expected_plan = validate_probe_envelope(json.loads(plan_output.read_text()), dict(args,case=case,role="plan"))["pipeline_plan"]
             record["pipeline_plan"] = expected_plan
             with (self.output / f"{key}.server.stderr").open("w") as se, \
                  (self.output / f"{key}.loadgen.stderr").open("w") as ce, client_log.open("w") as co, server_log.open("w") as so:
@@ -243,7 +247,7 @@ class Runner:
                     reader = threading.Thread(target=drain_stdout)
                     reader.start()
                     ready = json.loads(first)
-                    generator_args = dict(args, case="tcp", role="loadgen", ports=",".join(map(str, ready["ports"])),
+                    generator_args = dict(args, case=case, role="loadgen", ports=",".join(map(str, ready["ports"])),
                         **{"generator-cpus": ",".join(map(str, groups[1])), "reader-cpus": ",".join(map(str, groups[2]))})
                     client_cmd = ["taskset", "-c", ",".join(map(str, sorted(set(groups[1] + groups[2])))), str(self.bin / "spike_probe")]
                     client_cmd += [f"--{k}={v}" for k, v in generator_args.items()]

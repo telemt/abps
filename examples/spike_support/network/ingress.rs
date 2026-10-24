@@ -130,6 +130,7 @@ impl IngressStats {
 }
 pub(super) async fn run(session: Session, settings: Settings) -> Result<IngressStats> {
     let Session {
+        admission,
         stream,
         socket,
         origin,
@@ -147,6 +148,18 @@ pub(super) async fn run(session: Session, settings: Settings) -> Result<IngressS
             scratch,
             settings,
             stream,
+        )
+        .await;
+    }
+    if let Some(gate) = admission {
+        return super::admission::tcp::run_io(
+            into_async(socket)?,
+            origin,
+            subscribers,
+            scratch,
+            settings,
+            stream,
+            gate,
         )
         .await;
     }

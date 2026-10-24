@@ -19,7 +19,9 @@ and invariant IDs retain their exact spelling.
 | How do domains, shutdown and replacement work? | [Lifecycle and preparation](lifecycle-and-preparation.md) |
 | How are performance results validated? | [Current measurement harness](performance-harness.md) |
 | How can delivery improve at fixed arena capacity? | [Fixed-arena delivery profiles](fixed-arena-delivery.md) |
+| Can paced admission stabilize a tight arena? | [Admission dynamics](admission-dynamics.md) |
 | How can one consumer reuse a retained lease? | [Serial adapter](serial-reuse.md) |
+| How does bounded ownership behave in a streaming pipeline? | [Streaming qualification](streaming-validation.md) |
 | How are claims tested? | [Verification guide](verification.md), [registry](../verification/matrix.json), [unsafe inventory](../verification/unsafe-sites.json) |
 
 CONTRIBUTING defines semantics. Guides explain those semantics and cite their IDs.
@@ -37,6 +39,10 @@ The [adaptive freshness experiment](reports/2026-10-18/adaptive-freshness.md)
 records the sliding queue policy, dependency recovery and fixed-arena comparisons.
 The [adapter hot-path experiments](reports/2026-10-19/hot-path-experiments.md)
 compare timekeeping, metadata, staging and disposable queue representations.
+The [admission dynamics report](reports/2026-10-23/admission-dynamics.md) records
+AP-16 pacing, conservation tests, correlated-retention experiments and fixed-arena
+TCP comparisons, including negative findings and measurement limits.
+
 The [memory shortcuts implementation](reports/2026-10-23/memory-shortcuts.md)
 records serial reuse, admission-check reuse, class lookup and optional thin LTO.
 
@@ -91,3 +97,7 @@ excluded attempts, platform limits and measurement denominators must not be
 relabeled as results for a later revision.
 
 - [Adaptive memory research](adaptive-memory.md): AP-13 soft budgets and root generations; AP-14 shared opportunity, class pressure and conservative admission observations.
+
+The [streaming qualification report](reports/2026-10-24/streaming-validation.md)
+records AP-17–20 verification, terminal queue conservation and matched TCP/serial
+screening, including the cost of diagnostics and unqualified release gates.

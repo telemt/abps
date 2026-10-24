@@ -261,7 +261,7 @@ pub(super) fn run(args: &Args) -> Result<Value> {
         let reader_deadline = tokio::time::Instant::from_std(end + Duration::from_secs(2));
         let mut consumers = Vec::new();
         for ((socket, stream, subscriber), (stats, scratch)) in sockets.into_iter().zip(consumer_storage) {
-            let delay = if settings.slow && stream == 0 && subscriber == 0 {
+            let delay = if settings.admission.is_none() && settings.slow && stream == 0 && subscriber == 0 {
                 Duration::from_secs_f64(4.0 * settings.streams as f64 / rate as f64)
                     .max(Duration::from_millis(5))
             } else {

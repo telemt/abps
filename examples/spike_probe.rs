@@ -10,6 +10,9 @@ fn main() -> Result<()> {
     let args = Args::parse()?;
     spike_support::validate(&args)?;
     let result = match args.get("case", "micro") {
+        "admission-replay" | "admission-returns" => spike_support::network::admission::run(&args)?,
+        #[cfg(feature = "mosaic-spike")]
+        "memory-cycle" => spike_support::network::memory_cycle(&args)?,
         #[cfg(feature = "mosaic-spike")]
         "memory-replay" => spike_support::network::memory_replay(&args)?,
         "adapter" => spike_support::network::adapter_probe(&args)?,
@@ -24,7 +27,7 @@ fn main() -> Result<()> {
         "soak" => spike_support::soak::run(&args)?,
         "concurrent-views" => spike_support::diagnostics::concurrent_views(&args)?,
         "observe" => spike_support::observe(&args)?,
-        "tcp" => match args.get("role", "server") {
+        "tcp" | "admission-tcp" => match args.get("role", "server") {
             "server" => spike_support::network::server(&args)?,
             "plan" => spike_support::network::resource_plan(&args)?,
             "loadgen" => spike_support::network::loadgen(&args)?,

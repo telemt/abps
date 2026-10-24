@@ -157,6 +157,7 @@ impl Drop for CloseOnExit<'_> {
 }
 struct Worker {
     deferred_stats: Vec<IngressStats>,
+    queue_observers: Vec<(usize, usize, Arc<tracked_queue::Counts>)>,
     #[cfg(test)]
     fault: Fault,
     id: usize,
@@ -255,6 +256,16 @@ impl Worker {
         >,
     ) -> Result<Value> {
         let worker = self.id;
+        let admission = self
+            .settings
+            .admission
+            .as_ref()
+            .filter(|_| worker < self.settings.workers)
+            .map(|o| admission::Gate::new(o.clone(), self.settings.streams));
+        let _admission_driver = admission
+            .as_ref()
+            .filter(|g| g.paced())
+            .map(|g| admission::Driver(tokio::task::spawn_local(g.clone().drive())));
 
         let setup = async {
             let mut sessions = Vec::new();
@@ -314,6 +325,14 @@ impl Worker {
                         worker
                     };
                     for subscriber in 0..self.settings.fanout {
+                        let target = if self.settings.remote
+                            && let Some(o) = &self.settings.admission
+                        {
+                            self.settings.workers
+                                + (stream * self.settings.fanout + subscriber) % o.return_workers
+                        } else {
+                            target
+                        };
                         let output =
                             accept(&listener, stream, subscriber, self.settings.keyed()).await?;
                         let sr = socket2::SockRef::from(&output);
@@ -346,7 +365,9 @@ impl Worker {
                             });
                             continue;
                         }
-                        let (queue, receiver) = mpsc::channel(self.settings.queue);
+                        let (queue, receiver, observer) =
+                            tracked_queue::channel(self.settings.queue);
+                        self.queue_observers.push((stream, subscriber, observer));
                         self.senders[target]
                             .try_send(SetupJob::Writer(WriterJob {
                                 socket: output,
@@ -355,7 +376,7 @@ impl Worker {
                             }))
                             .map_err(|_| "writer setup capacity/receiver unavailable")?;
                         subscribers.push(Subscriber {
-                            queue: queue.into(),
+                            queue: local_queue::IngressSender::Tracked(queue),
                             active: true,
                             cancel: Some(cancel),
                         });
@@ -367,6 +388,7 @@ impl Worker {
                             .map_err(|_| "group setup capacity/receiver unavailable")?;
                     }
                     sessions.push(Session {
+                        admission: admission.clone(),
                         stream,
                         socket,
                         origin,
@@ -520,7 +542,7 @@ impl Worker {
         let local_queues: Vec<_> = local_observers.iter().map(|(stream, subscriber, observer)|
             json!({"stream":stream,"subscriber":subscriber,"metrics":observer.json()})).collect();
         Ok(
-            json!({"worker":worker,"streams":[],"writer_completed":written.completed.load(Ordering::Relaxed),
+            json!({"admission":admission.as_ref().map(|g|g.json()),"worker":worker,"streams":[],"writer_completed":written.completed.load(Ordering::Relaxed),
                     "writer_aborted": {"deadline":written.aborted_deadline.load(Ordering::Relaxed),"policy":written.aborted_policy.load(Ordering::Relaxed),"io":written.aborted_io.load(Ordering::Relaxed),"cancel":written.aborted_cancel.load(Ordering::Relaxed),"unwind":written.aborted_unwind.load(Ordering::Relaxed)},
                     "write_api_calls":written.write_calls.load(Ordering::Relaxed),"expired_writers":written.expired.load(Ordering::Relaxed),
                     "cancelled_writers":cancelled,"writer_io_errors":writer_errors,"send_buffers":buffers,"local_queues":local_queues}),
@@ -568,6 +590,8 @@ impl Worker {
                 .map(IngressStats::json)
                 .collect::<Vec<_>>()
         );
+        value["tokio_queues"] = json!(self.queue_observers.iter().map(|(stream, subscriber, counts)|
+            json!({"stream":stream,"subscriber":subscriber,"metrics":counts.json()})).collect::<Vec<_>>());
         value["flow_complete"] = json!(cohort.0.borrow().quiet.iter().all(|x| *x));
         value["destroyed"] = json!(destroyed);
         value["drained"] = snapshot;
@@ -691,6 +715,7 @@ pub fn run(args: &Args) -> Result<Value> {
         for ((id, receiver), pool) in receivers.into_iter().enumerate().zip(pools) {
             let w = Worker {
                 deferred_stats: Vec::new(),
+                queue_observers: Vec::new(),
                 #[cfg(test)]
                 fault: Fault::None,
                 id,
@@ -870,6 +895,7 @@ mod worker_regressions {
             ports.push(listener.local_addr().unwrap().port());
             let worker = Worker {
                 deferred_stats: Vec::new(),
+                queue_observers: Vec::new(),
                 fault: if id == 1 { fault } else { Fault::None },
                 id,
                 listener: Some(listener),

@@ -83,6 +83,8 @@ pub struct Decision {
 }
 
 pub struct Shared {
+    #[cfg(test)]
+    pub checks: std::cell::Cell<usize>,
     pub cache: Accounting,
     pub now_ms: u64,
     pressure_ms: u64,
@@ -108,6 +110,8 @@ pub struct Shared {
 impl Shared {
     pub fn new(pressure_ms: u64) -> Self {
         Self {
+            #[cfg(test)]
+            checks: std::cell::Cell::new(0),
             cache: Accounting::default(),
             now_ms: 0,
             pressure_ms,
@@ -162,6 +166,8 @@ impl Shared {
         class: usize,
         charge: usize,
     ) -> Result<Decision, &'static str> {
+        #[cfg(test)]
+        self.checks.set(self.checks.get() + 1);
         if !p.active[stream] {
             return Err("ClosedStream");
         }

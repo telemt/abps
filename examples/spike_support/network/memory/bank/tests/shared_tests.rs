@@ -1,4 +1,76 @@
 use super::*;
+
+#[test]
+fn ap14_decision_reuse_checks_once_unless_refresh_invalidates_it() {
+    for cached in [false, true] {
+        let mut plan = shared_plan(1, 1, 64, 64);
+        plan.options.cached_accounting = cached;
+        let bank = Bank::prepare(plan).unwrap();
+        let h = Bank::open(&bank).unwrap();
+        let observations = || {
+            let b = bank.borrow();
+            let s = b.shared.as_ref().unwrap();
+            (s.checks.get(), s.ledger_refreshes, s.cache_passes)
+        };
+        let before = observations();
+        let held = h.acquire(64).unwrap();
+        let after = observations();
+        assert_eq!(after.0 - before.0, 1);
+        assert_eq!(after.1 - before.1, u64::from(!cached));
+        assert_eq!(after.2 - before.2, u64::from(cached));
+        assert!(matches!(
+            h.acquire(64),
+            Err(Failure::Policy("LogicalHardLimit"))
+        ));
+        let rejected = observations();
+        assert_eq!(rejected.0 - after.0, if cached { 2 } else { 1 });
+        assert_eq!(rejected.1 - after.1, 1);
+        assert_eq!(bank.borrow().admitted()[0], 64);
+        drop(held);
+        // The cached rejection is stale: its fresh decision must permit reuse.
+        drop(h.acquire(64).unwrap());
+        let refreshed = observations();
+        assert_eq!(refreshed.0 - rejected.0, if cached { 2 } else { 1 });
+        assert_eq!(refreshed.1 - rejected.1, 1);
+        drop(h);
+        assert!(matches!(
+            bank.borrow_mut().acquire(0, 64),
+            Err(Failure::Policy("ClosedStream"))
+        ));
+        let closed = observations();
+        assert_eq!(closed.0 - refreshed.0, 1);
+        assert_eq!(closed.1 - refreshed.1, u64::from(!cached));
+        assert!(bank.borrow_mut().shutdown());
+    }
+}
+
+#[test]
+fn ap14_class_charge_matches_independent_first_fit_at_every_boundary() {
+    for count in [1, 2, 8, 32, 63, 64] {
+        let classes: Vec<_> = (1..=count)
+            .map(|i| ClassConfig {
+                capacity: i * i + 17,
+                slots: 1,
+            })
+            .collect();
+        let mut sizes = vec![0, 1, usize::MAX];
+        for c in &classes {
+            sizes.extend([c.capacity - 1, c.capacity, c.capacity + 1]);
+        }
+        for size in sizes {
+            let oracle = classes
+                .iter()
+                .map(|c| c.capacity)
+                .filter(|&c| c >= size)
+                .min();
+            assert_eq!(
+                class_charge(&classes, size),
+                oracle,
+                "classes={count} size={size}"
+            );
+        }
+    }
+}
 fn shared_plan(streams: usize, slots: usize, hard: usize, total: usize) -> Plan {
     let mut p = plan(hard);
     p.config = mosaic::Config::new(

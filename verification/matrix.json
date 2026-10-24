@@ -2412,6 +2412,116 @@
         "miri"
       ],
       "critical": true
+    },
+    {
+      "id": "admission-controller",
+      "invariants": [
+        "AP-16",
+        "MEM-02"
+      ],
+      "selector": "admission::tests::ap16_",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native",
+        "miri"
+      ],
+      "critical": true
+    },
+    {
+      "id": "admission-tcp-lifecycle",
+      "invariants": [
+        "AP-16",
+        "LIFE-01",
+        "IO-01"
+      ],
+      "selector": "admission::tcp::tests::ap16_",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "admission-trace-work",
+      "invariants": [
+        "AP-16"
+      ],
+      "selector": "admission::experiment::tests::ap16_",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native"
+      ],
+      "critical": true
+    },
+    {
+      "id": "streaming-queue-receipts",
+      "invariants": [
+        "AP-19",
+        "SI-04",
+        "AP-12"
+      ],
+      "selector": "ap19_",
+      "features": "local-branches-spike,bytes-interop",
+      "target": [
+        "--example",
+        "spike_probe"
+      ],
+      "tools": [
+        "native",
+        "miri",
+        "asan",
+        "tsan"
+      ],
+      "critical": true
+    },
+    {
+      "id": "streaming-serial-tcp",
+      "invariants": [
+        "AP-15",
+        "AP-19"
+      ],
+      "selector": "ap19_",
+      "features": "serial-adapter",
+      "target": [
+        "--example",
+        "serial_tcp"
+      ],
+      "tools": [
+        "native"
+      ],
+      "critical": true
+    },
+    {
+      "id": "streaming-occupancy",
+      "invariants": [
+        "AP-18",
+        "MEM-02"
+      ],
+      "selector": "ap18_",
+      "features": "berry-spike",
+      "target": [
+        "--example",
+        "streaming_probe"
+      ],
+      "tools": [
+        "native"
+      ],
+      "critical": true
     }
   ],
   "intentional_retention": [
@@ -2623,6 +2733,16 @@
         "AP-15",
         "MEM-02",
         "PROG-04"
+      ]
+    },
+    {
+      "id": "admission-pacing",
+      "example": "spike_alloc",
+      "arguments": [
+        "--case=admission-replay"
+      ],
+      "invariants": [
+        "AP-16"
       ]
     }
   ],

@@ -8,6 +8,11 @@ spec=importlib.util.spec_from_file_location('verify',Path(__file__).with_name('v
 v=importlib.util.module_from_spec(spec);spec.loader.exec_module(v)
 
 class VerificationTests(unittest.TestCase):
+    def test_serial_feature_does_not_redefine_existing_full_campaign(self):
+        self.assertEqual(v.FULL, 'local-branches-spike,bytes-interop')
+        self.assertIn('serial-adapter', v.feature_set(v.SERIAL))
+        self.assertIn(v.SERIAL_ADAPTER, v.MIRI_GROUPS)
+        self.assertIn('serial-adapter', v.NATIVE)
     def test_remote_authority_rejects_only_the_expected_compiler_error(self):
         import json
         import check_remote_authority as a

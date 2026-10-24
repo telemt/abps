@@ -147,6 +147,21 @@ def validate_issuer_flow(server, client):
         equal(enqueued,sums['enqueued'],'local_queues.enqueued')
         require(evicted+queue_cancelled<=enqueued-written,'local_queues.losses','losses exceed uncompleted enqueued')
         if server['pipeline_plan'].get('freshness_priority')=='off':equal(evicted,0,'local_queues.fifo_evictions')
+    receipt_mode = server.get("pipeline_plan", {}).get("queue_accounting") == "receipts-v1"
+    transferred = 0
+    if receipt_mode:
+        queues = [q for w in workers for q in field(w, "tokio_queues", "worker")]
+        equal(len(queues), len(streams)*fanout, "tokio_queues.count")
+        identities = [(count(q,"stream","queue"), count(q,"subscriber","queue")) for q in queues]
+        require(len(set(identities)) == len(identities), "tokio_queues", "duplicate recipient")
+        enqueued = 0
+        for q in queues:
+            m = field(q, "metrics", "queue")
+            equal(count(m,"enqueued","queue"), count(m,"transferred","queue") + count(m,"cancelled","queue"), "queue.receipts")
+            enqueued += m["enqueued"]
+            transferred += m["transferred"]
+            queue_cancelled += m["cancelled"]
+        equal(enqueued, sums["enqueued"], "tokio_queues.enqueued")
     # Legacy binaries lack batch outcomes. Retain their residual explicitly.
     aborted = 0
     reported = sum("writer_aborted" in w for w in workers)
@@ -159,7 +174,11 @@ def validate_issuer_flow(server, client):
                            ("deadline", "policy", "io", "cancel", "unwind"))
     residual = sums["enqueued"] - written - evicted - queue_cancelled - aborted
     require(residual >= 0, "writer_aborted", "duplicate loss accounting")
-    # Local queues observe their own cancellation; remote Tokio queues do not.
+    if receipt_mode:
+        require(classified, "writer_aborted", "receipt schema requires writer outcomes")
+        equal(transferred, written + aborted, "queue.writer_transfer")
+        equal(residual, 0, "flow.classified_tokio_losses")
+    # Legacy Tokio queues retain an explicit residual.
     if classified and server.get("pipeline_plan", {}).get("queue_backend") == "local":
         equal(residual, 0, "flow.classified_local_losses")
     seconds = field(client, "measurement_seconds", "loadgen")

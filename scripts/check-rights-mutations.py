@@ -61,6 +61,14 @@ def cases():
             (backend+"-generation-relaxed-final-load-acquire-load", protocol, "let _ = self.0.load(Ordering::Acquire);", "let _ = self.0.load(Ordering::Relaxed);", loom, generation),
         ])
     result.extend([
+        ("queue-lost-cancellation", "examples/spike_support/network/tracked_queue.rs",
+         "self.0.fetch_add(1, Ordering::Relaxed);", "self.0.fetch_add(0, Ordering::Relaxed);",
+         ["--features", FULL, "--example", "spike_probe"],
+         "spike_support::network::tracked_queue::tests::ap19_partial_write_cancellation_separates_queue_and_batch"),
+        ("queue-lost-transfer", "examples/spike_support/network/tracked_queue.rs",
+         "self.counts.transferred.fetch_add(1, Ordering::Relaxed);", "self.counts.transferred.fetch_add(0, Ordering::Relaxed);",
+         ["--features", FULL, "--example", "spike_probe"],
+         "spike_support::network::tracked_queue::tests::ap19_partial_write_cancellation_separates_queue_and_batch"),
         ("shared-soft-total-bypass", "examples/spike_support/network/memory/shared.rs",
          ".is_none_or(|v| v > p.total)", ".is_none_or(|_| false)",
          ["--features", FULL, "--example", "spike_probe"],

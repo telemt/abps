@@ -21,9 +21,11 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 
 mod adaptive;
+pub mod admission;
 mod ingress;
 mod input;
 mod memory;
+mod tracked_queue;
 #[cfg(feature = "mosaic-spike")]
 pub fn memory_allocation_probe(
     allocator: &stats_alloc::StatsAlloc<std::alloc::System>,
@@ -34,6 +36,10 @@ pub fn memory_allocation_probe(
 #[cfg(feature = "mosaic-spike")]
 pub fn memory_replay(args: &Args) -> Result<Value> {
     memory::replay(args)
+}
+#[cfg(feature = "mosaic-spike")]
+pub fn memory_cycle(args: &Args) -> Result<Value> {
+    memory::cycle(args)
 }
 #[cfg(feature = "mosaic-spike")]
 pub fn staged_allocation_probe(
@@ -75,6 +81,7 @@ enum SlowPattern {
 }
 #[derive(Clone)]
 struct Settings {
+    admission: Option<admission::Options>,
     memory: Option<memory::Options>,
     arrival_pattern: String,
     workers: usize,
@@ -117,7 +124,17 @@ impl Settings {
     fn new(args: &Args) -> Result<Self> {
         let workers = args.n("threads", 1);
         let streams = args.n("streams", workers);
-        let fanout = args.n("fanout", 20);
+        let fanout = args.n(
+            "fanout",
+            if matches!(
+                args.get("case", "micro"),
+                "admission-replay" | "admission-returns"
+            ) {
+                1
+            } else {
+                20
+            },
+        );
         let queue = args.n("queue", 8);
         let write_batch = args.n("write-batch", 1);
         let read_buf = match args.get("ingress", "initialized") {
@@ -202,6 +219,7 @@ impl Settings {
                     .into(),
             );
         }
+        let admission = admission::Options::parse(args, &class_capacities)?;
         let domain_limit = args
             .0
             .get("domain-limit-bytes")
@@ -234,7 +252,8 @@ impl Settings {
             .0
             .get("max-frame-age-ms")
             .map(|s| s.parse::<u64>())
-            .transpose()?;
+            .transpose()?
+            .or_else(|| admission.as_ref().map(|_| 100));
         if max_frame_age.is_some_and(|ms| ms == 0 || ms > 3_600_000) {
             return Err("max-frame-age-ms must be 1..3600000".into());
         }
@@ -248,7 +267,7 @@ impl Settings {
         }
         if !(1..=8).contains(&workers)
             || !(workers..=64).contains(&streams)
-            || !(1..=20).contains(&fanout)
+            || !(1..=if admission.is_some() { 100 } else { 20 }).contains(&fanout)
             || !(1..=1024).contains(&queue)
             || !(1..=8).contains(&write_batch)
             || !(1..=20).contains(&keyframe_burst)
@@ -369,7 +388,18 @@ impl Settings {
         {
             return Err("memory policy requires one Mosaic issuer, local queues/returns, scalar/batch and Skip".into());
         }
+        if admission.is_some()
+            && (workers != 1
+                || local_branches
+                || worker_branches
+                || staged_copy
+                || read_buf
+                || args.get("backend", "berry") == "abps")
+        {
+            return Err("admission experiments require one issuer, initialized ingress and scalar/batch fan-out".into());
+        }
         Ok(Self {
+            admission,
             memory,
             arrival_pattern: arrival_pattern.into(),
             setup_timeout: Duration::from_millis(setup_ms as u64),
@@ -430,7 +460,9 @@ impl Settings {
     }
     fn runtime_workers(&self) -> usize {
         if self.remote {
-            self.workers.max(2)
+            self.admission
+                .as_ref()
+                .map_or(self.workers.max(2), |a| self.workers + a.return_workers)
         } else {
             self.workers
         }
@@ -657,7 +689,7 @@ struct Subscriber {
 }
 struct WriterJob {
     socket: Socket,
-    queue: mpsc::Receiver<Message>,
+    queue: tracked_queue::Receiver<Message>,
     cancel: oneshot::Receiver<()>,
 }
 enum SetupJob {
@@ -666,6 +698,7 @@ enum SetupJob {
     Group(worker_fanout::Job),
 }
 struct Session {
+    admission: Option<std::rc::Rc<admission::Gate>>,
     stream: usize,
     socket: Socket,
     origin: memory::StreamOrigin,
@@ -676,6 +709,7 @@ struct Session {
 }
 #[derive(Default)]
 struct IngressStats {
+    admission_study: Option<Value>,
     stream: usize,
     #[cfg(feature = "local-branches-spike")]
     worker_flow: Option<Arc<worker_fanout::Flow>>,
@@ -709,7 +743,7 @@ impl IngressStats {
         let (forwarded, cancelled) = self.worker_flow.as_ref().map_or((0, 0), |f| f.sample());
         #[cfg(not(feature = "local-branches-spike"))]
         let (forwarded, cancelled) = (0u64, 0u64);
-        json!({"stream":self.stream,"received":self.received,"accepted":self.accepted,
+        json!({"admission_study":self.admission_study,"stream":self.stream,"received":self.received,"accepted":self.accepted,
         "enqueued":self.enqueued+forwarded,
         "dispatched_recipient_rights":self.dispatched,"locally_enqueued":forwarded,
         "cancelled_before_forward":cancelled,
@@ -880,15 +914,22 @@ async fn consume(
     slow: Duration,
     validation: Validation,
 ) -> Consumer {
+    let mut wire_pacer = validation
+        .settings
+        .admission
+        .as_ref()
+        .filter(|_| validation.settings.slow && stats.stream == 0 && stats.subscriber == 0)
+        .map(|o| admission::tcp::WirePacer::new(o.slow_bytes));
     let mut previous = None;
     let mut previous_sequence: Option<u64> = None;
     loop {
         let mut bytes = [0; HEADER_V2];
         let mut prefix = 0;
-        let read = payload::read_prefix(
+        let read = admission::tcp::paced_prefix(
             &mut socket,
             &mut bytes[..validation.settings.header_len()],
             &mut prefix,
+            &mut wire_pacer,
         );
         match tokio::time::timeout_at(deadline, read).await {
             Ok(Ok(true)) => (),
@@ -934,7 +975,12 @@ async fn consume(
             break;
         }
         prefix = 0;
-        let read = payload::read_prefix(&mut socket, &mut buffer[..header.len], &mut prefix);
+        let read = admission::tcp::paced_prefix(
+            &mut socket,
+            &mut buffer[..header.len],
+            &mut prefix,
+            &mut wire_pacer,
+        );
         match tokio::time::timeout_at(deadline, read).await {
             Ok(Ok(true)) => (),
             result => {

@@ -31,6 +31,7 @@ pub(super) struct RootPlan {
     upper_bytes: usize,
     writer_storage: usize,
     external_bytes: usize,
+    admission_bytes: usize,
 }
 pub(super) struct PipelinePlan {
     pub roots: Vec<RootPlan>,
@@ -186,6 +187,12 @@ impl PipelinePlan {
                         local_queue::storage_model_bytes::<Message>(s.queue)
                             .ok_or("local queue model overflow")?,
                     )?
+                } else if !s.worker_branches {
+                    mul(
+                        writers,
+                        tracked_queue::storage_model_bytes::<Message>(s.queue)
+                            .ok_or("tracked queue model overflow")?,
+                    )?
                 } else {
                     mul(queued, {
                         #[cfg(feature = "local-branches-spike")]
@@ -243,6 +250,11 @@ impl PipelinePlan {
                     )?,
                 )?,
                 external_bytes: 0,
+                admission_bytes: if let Some(o) = &s.admission {
+                    admission::storage_bytes(streams.len(), s.fanout, o)
+                } else {
+                    0
+                },
             });
         }
         let mut external_total = 0;
@@ -254,6 +266,7 @@ impl PipelinePlan {
                 r.semaphore_storage,
                 r.descriptors,
                 r.writer_storage,
+                r.admission_bytes,
             ]
             .into_iter()
             .try_fold(0, add)?;
@@ -353,7 +366,7 @@ impl PipelinePlan {
                 "reservation_bytes":r.reservation_bytes,"writers":r.writers,"configured_backing_bytes":r.backing_bytes,"backing_is_modeled":r.backing_is_modeled,"metadata_bytes":r.metadata_bytes,
                 "metadata_is_modeled":r.metadata_is_modeled})
         }).collect();
-        json!({"memory":memory,"baseline_external_storage_model_bytes":self.roots.iter().map(|r|r.external_bytes).sum::<usize>(),"external_storage_model_bytes":self.roots.iter().map(|r|r.external_bytes).sum::<usize>()+memory.as_ref().and_then(|m|m["extra_external_bytes"].as_u64()).unwrap_or(0) as usize,"external_memory_limit_bytes":s.external_memory_limit,"ingress_buffer_bytes":s.scratch_bytes(),"queue_backend":if s.local_queue {"local"} else {"tokio"},"freshness_priority":if s.adaptive.is_some() {"adaptive"} else if s.freshness_min_age.is_some() {"oldest"} else {"off"},"freshness_min_age_ms":s.freshness_min_age.map(|v|v.as_millis()),"adaptive":s.adaptive.map(|p|json!({"target_ms":p.target.as_millis(),"grace_ms":p.grace.as_millis(),"stall_ms":p.stall.as_millis(),"keyframe_wait_ms":p.key_wait.as_millis(),"keyed":p.keyed})),"wire_version":if s.keyed(){2}else{1},"adaptive_timer_model_bytes":if s.adaptive.is_some(){std::mem::size_of::<tokio::time::Interval>()*s.streams*s.fanout}else{0},"roots":roots,"class_slots":s.class_slots,"class_capacities":s.class_capacities,"distribution":s.distribution,"write_batch":s.write_batch,
+        json!({"admission":self.settings.admission.as_ref().map(|a|a.json()),"admission_metadata_bytes":self.roots.iter().map(|r|r.admission_bytes).sum::<usize>(),"memory":memory,"baseline_external_storage_model_bytes":self.roots.iter().map(|r|r.external_bytes).sum::<usize>(),"external_storage_model_bytes":self.roots.iter().map(|r|r.external_bytes).sum::<usize>()+memory.as_ref().and_then(|m|m["extra_external_bytes"].as_u64()).unwrap_or(0) as usize,"external_memory_limit_bytes":s.external_memory_limit,"ingress_buffer_bytes":s.scratch_bytes(),"queue_accounting":if s.local_queue {"local"} else if s.worker_branches {"worker-credits"} else {"receipts-v1"},"queue_backend":if s.local_queue {"local"} else {"tokio"},"freshness_priority":if s.adaptive.is_some() {"adaptive"} else if s.freshness_min_age.is_some() {"oldest"} else {"off"},"freshness_min_age_ms":s.freshness_min_age.map(|v|v.as_millis()),"adaptive":s.adaptive.map(|p|json!({"target_ms":p.target.as_millis(),"grace_ms":p.grace.as_millis(),"stall_ms":p.stall.as_millis(),"keyframe_wait_ms":p.key_wait.as_millis(),"keyed":p.keyed})),"wire_version":if s.keyed(){2}else{1},"adaptive_timer_model_bytes":if s.adaptive.is_some(){std::mem::size_of::<tokio::time::Interval>()*s.streams*s.fanout}else{0},"roots":roots,"class_slots":s.class_slots,"class_capacities":s.class_capacities,"distribution":s.distribution,"write_batch":s.write_batch,
             "capacity_check":if s.require_envelope {"require-envelope"} else {"report"},
             "fanout_api":if s.worker_branches {"worker-branches"} else if s.local_branches {"local-branches"} else if s.batch_fanout {"batch"} else {"scalar"},
             "capacity_policy":format!("{:?}",s.capacity_policy),"max_frame_age_ms":s.max_frame_age.map(|a|a.as_millis()),

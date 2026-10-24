@@ -511,3 +511,7 @@ describes opt-in staging, external storage ceilings and writer loss accounting.
 The opt-in [adaptive memory experiment](adaptive-memory.md) compares fixed and
 adaptive soft admission with explicitly charged small-root topology. Retention
 replay, trace and TCP timing are separate evidence; defaults remain unchanged.
+
+The [AP-16 admission dynamics profile](admission-dynamics.md) separates logical
+replay, instrumented remote returns and matched TCP evidence. Its paced variants
+retain fixed arena capacity; rates and bursts are explicit, default-off settings.

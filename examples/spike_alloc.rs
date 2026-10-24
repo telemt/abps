@@ -92,6 +92,16 @@ fn revisions(args: &Args) -> Result<Value> {
     )
 }
 fn main() -> Result<()> {
+    if std::env::args().any(|a| a == "--case=admission-replay") {
+        let args = Args::parse()?;
+        spike_support::validate(&args)?;
+        println!(
+            "{}",
+            json!({"args":args.0,"result":spike_support::network::admission::allocation_probe(GLOBAL)})
+        );
+        return Ok(());
+    }
+
     let args = Args::parse()?;
     spike_support::validate(&args)?;
     let control = Region::new(GLOBAL);

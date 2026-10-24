@@ -4,11 +4,15 @@
 mod bank;
 pub mod controller;
 #[cfg(feature = "mosaic-spike")]
+mod cycle;
+#[cfg(feature = "mosaic-spike")]
 mod shared;
 use super::*;
 #[cfg(feature = "mosaic-spike")]
 pub use bank::{Bank, Handle};
 use controller::{GROUPS, Mode, Priority, STREAMS};
+#[cfg(feature = "mosaic-spike")]
+pub use cycle::run as cycle;
 #[derive(Clone, Debug)]
 pub struct Options {
     pub mode: Mode,
@@ -315,6 +319,16 @@ impl StreamOrigin {
         #[cfg(feature = "mosaic-spike")]
         if let Self::Managed(h) = self {
             h.offer(_size);
+        }
+    }
+    pub fn acquire_once(
+        &self,
+        size: usize,
+    ) -> std::result::Result<super::super::backend::Lease, Failure> {
+        match self {
+            Self::Ordinary(o) => o.acquire(size).map_err(Failure::Core),
+            #[cfg(feature = "mosaic-spike")]
+            Self::Managed(h) => h.acquire(size).map(super::super::backend::Lease::Mosaic),
         }
     }
     pub async fn acquire(

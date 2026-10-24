@@ -544,6 +544,7 @@ fn blocked<T>(state: &Shared<T>) -> bool {
 // The common ingress dispatch keeps the ordinary Tokio queue unchanged.
 pub(super) enum IngressSender {
     Tokio(mpsc::Sender<Message>),
+    Tracked(tracked_queue::Sender<Message>),
     Local(Sender<Message>),
 }
 impl From<mpsc::Sender<Message>> for IngressSender {
@@ -553,6 +554,7 @@ impl From<mpsc::Sender<Message>> for IngressSender {
 }
 pub(super) enum IngressPermit<'a> {
     Tokio(mpsc::Permit<'a, Message>),
+    Tracked(tracked_queue::Permit<'a, Message>),
     Local(Permit<Message>),
 }
 impl IngressSender {
@@ -580,6 +582,7 @@ impl IngressSender {
                     mpsc::error::TrySendError::Closed(_) => Rejected::Closed,
                 }),
             Self::Local(s) => s.try_reserve().map(IngressPermit::Local),
+            Self::Tracked(s) => s.try_reserve().map(IngressPermit::Tracked),
         }
     }
 }
@@ -590,6 +593,7 @@ impl IngressPermit<'_> {
     pub fn send_ready(self, value: Message, ready: Instant) {
         match self {
             Self::Tokio(p) => p.send(value),
+            Self::Tracked(p) => p.send(value),
             Self::Local(p) => {
                 let deadline = value.deadline;
                 p.send_at(value, ready, deadline);

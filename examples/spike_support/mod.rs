@@ -15,6 +15,13 @@ use std::time::Instant;
 
 pub fn validate(args: &Args) -> Result<()> {
     const KEYS: &[&str] = &[
+        "admission-pacing",
+        "admission-rate-bytes",
+        "admission-burst-bytes",
+        "return-workers",
+        "slow-bytes-per-second",
+        "release-pattern",
+        "release-period-us",
         "case",
         "active-domains",
         "fragmentation",
@@ -135,7 +142,12 @@ pub fn validate(args: &Args) -> Result<()> {
             }
         }
     }
-    if !(0..=20).contains(&args.n("fanout", 20)) {
+    let max_fanout = if args.get("case", "micro").starts_with("admission-") {
+        100
+    } else {
+        20
+    };
+    if !(0..=max_fanout).contains(&args.n("fanout", 20)) {
         return Err("micro fanout must be 0..20; TCP requires 1..20".into());
     }
     if ![

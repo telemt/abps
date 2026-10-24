@@ -16,6 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 MATRIX = ROOT / "verification/matrix.json"
 NATIVE = ["", "berry-spike", "bytes-interop", "mosaic-spike", "mosaic-spike,bytes-interop", "local-branches-spike", "local-branches-spike,bytes-interop"]
 FULL = NATIVE[-1]
+SERIAL = FULL + ",serial-adapter"
+NATIVE.extend(["serial-adapter", "serial-adapter,bytes-interop", SERIAL])
+SERIAL_ADAPTER = (["--test", "serial_adapter"], "ap15_")
 MIRI_GROUPS = [(["--lib"],"berry::raw::"),(["--lib"],"mosaic::raw::"),(["--test","model"],"mem_own_life_same_trace"),(["--test","model"],"reservations::"),(["--test","adversarial"],""),(["--test","local_branches"],"four_ledgers"),(["--test","issuer_snapshots"],""),(["--test","configuration"],"")]
 LOCAL_QUEUE = (["--example", "spike_probe"], "ap10_")
 ADAPTIVE_QUEUE = (["--example", "spike_probe"], "ap11_")
@@ -23,11 +26,14 @@ HOTPATH_ADAPTER = (["--example", "spike_probe"], "ap12_")
 MEMORY_ADAPTER = (["--example", "spike_probe"], "ap13_")
 SHARED_MEMORY = (["--example", "spike_probe"], "ap14_")
 MIRI_GROUPS.extend([LOCAL_QUEUE, ADAPTIVE_QUEUE, HOTPATH_ADAPTER, MEMORY_ADAPTER, SHARED_MEMORY])
+ADMISSION_DYNAMICS = (["--example", "spike_probe"], "admission::")
+QUEUE_RECEIPTS = (["--example", "spike_probe"], "ap19_")
+MIRI_GROUPS.extend([SERIAL_ADAPTER, ADMISSION_DYNAMICS, QUEUE_RECEIPTS])
 ADAPTER_CREDITS = (["--example", "spike_probe"], "spike_support::network::worker_fanout::tests::")
 SANITIZER_GROUPS = [(["--lib"], "raw::"), (["--test", "model"], ""),
                     (["--test", "adversarial"], ""), (["--test", "local_branches"], ""),
                     (["--test", "issuer_snapshots"], ""), (["--test", "configuration"], ""), (["--test", "issuer_stress"], ""), ADAPTER_CREDITS, LOCAL_QUEUE, ADAPTIVE_QUEUE, HOTPATH_ADAPTER, MEMORY_ADAPTER, SHARED_MEMORY,
-                    (["--example","spike_probe"],"abps_scripted_")]
+                    (["--example","spike_probe"],"abps_scripted_"), ADMISSION_DYNAMICS, QUEUE_RECEIPTS]
 NIGHTLY = "nightly-2026-10-03"
 REFERENCE_CONFIG_TEST = "verification_config::reference_acquire_mode_matches_campaign"
 
@@ -400,6 +406,7 @@ class Runner:
                 tasks.append(("mutations:components", lambda: self.mutations("components")))
         elif self.args.suite == "allocations":
             tasks.append(("allocation-build", lambda: self.run("allocation-build",["cargo","build","--locked","--release","--features",FULL,"--examples"])))
+            tasks.append(("serial-allocation-build", lambda: self.run("serial-allocation-build",["cargo","build","--locked","--release","--features",SERIAL,"--example","serial_alloc"])))
             tasks += [("allocation:"+probe["id"],lambda p=probe:self.allocation_probe(p)) for probe in self.data["allocation_probes"]]
         elif self.args.suite == "loom":
             for mode in ["fence", "acquire-load"]:
@@ -495,7 +502,8 @@ class Runner:
         aliases = ["stacked","tree"] if self.args.alias=="both" else [self.args.alias]
         groups = [only_group] if only_group else MIRI_GROUPS
         for target,selector in groups:
-            names = self.list_tests(FULL,target,selector)
+            features = SERIAL if (target,selector) == SERIAL_ADAPTER else FULL
+            names = self.list_tests(features,target,selector)
             leaks = sorted(set(names)&set(self.data["intentional_retention"]))
             clean = sorted(set(names)-set(leaks))
             for seed in seeds:
@@ -504,9 +512,9 @@ class Runner:
                     env = {"MIRIFLAGS":flags,"CARGO_TARGET_DIR":str(self.build/"miri"),"PROPTEST_RNG_SEED":str(self.args.seed)}
                     if clean:
                         skips = [item for name in leaks for item in ["--skip",name]]
-                        self.execute_tests(f"miri-{alias}-{seed}",FULL,target,selector,miri=True,env=env,harness=skips)
+                        self.execute_tests(f"miri-{alias}-{seed}",features,target,selector,miri=True,env=env,harness=skips)
                     for name in leaks:
-                        self.execute_tests(f"miri-intentional-retention-{alias}-{seed}",FULL,target,name,miri=True,env=env|{"MIRIFLAGS":flags+" -Zmiri-ignore-leaks"},harness=["--exact"])
+                        self.execute_tests(f"miri-intentional-retention-{alias}-{seed}",features,target,name,miri=True,env=env|{"MIRIFLAGS":flags+" -Zmiri-ignore-leaks"},harness=["--exact"])
 
     def sanitizer_environment(self,kind):
         flag = {"asan":"address","tsan":"thread","msan":"memory"}[kind]
